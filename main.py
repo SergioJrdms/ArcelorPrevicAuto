@@ -305,14 +305,14 @@ def main():
 
     # Sidebar
     with st.sidebar:
-        st.image("https://via.placeholder.com/200x80/1f77b4/FFFFFF?text=ArcelorMittal",
+        st.image("https://companieslogo.com/img/orig/MT_BIG.D-48309f61.png?t=1741059352",
                  use_container_width=True)
         st.markdown("### ⚙️ Configurações")
 
         modo = st.radio(
             "Modo de Operação:",
-            ["📁 Upload de Arquivo", "🧪 Dados de Teste"],
-            help="Escolha entre analisar seus dados ou usar dados de teste"
+            ["📁 Upload de Arquivo"],
+            help="Outros modos de operação serão implementados futuramente."
         )
 
         st.markdown("---")

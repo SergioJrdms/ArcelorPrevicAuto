@@ -306,7 +306,7 @@ def main():
     # Sidebar
     with st.sidebar:
         st.image("https://companieslogo.com/img/orig/MT_BIG.D-48309f61.png?t=1741059352",
-                 use_container_width=True)
+                 use_container_width=True, width=150, caption="Projeto PrevicAuto - V0.1", clamp=True, output_format="PNG", channels="RGB")
         st.markdown("### ⚙️ Configurações")
 
         modo = st.radio(
@@ -530,13 +530,31 @@ def main():
                             height=400
                         )
 
-                        # Download
-                        csv = erros.to_csv(index=False).encode('utf-8')
+                        st.markdown("### 📥 Baixar Resultados da Análise")
+
+                        buffer = io.BytesIO()
+                        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                            # Aba com toda a análise
+                            df_resultado.to_excel(
+                                writer, index=False, sheet_name='Analise Completa')
+
+                            # Aba apenas com erros (opcional)
+                            erros = df_resultado[df_resultado['GRAVIDADE'] == 'ERRO']
+                            if not erros.empty:
+                                erros.to_excel(
+                                    writer, index=False, sheet_name='Erros')
+
+                            # Aba de estatísticas (opcional)
+                            pd.DataFrame([stats]).to_excel(
+                                writer, index=False, sheet_name='Resumo')
+
+                            writer.close()
+
                         st.download_button(
-                            "📥 Download Erros (XLSX)",
-                            csv,
-                            f"erros_{mes_selecionado}.csv",
-                            "text/csv"
+                            label="📊 Download Análise Completa (XLSX)",
+                            data=buffer.getvalue(),
+                            file_name=f"analise_completa_{mes_selecionado}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
 
     with tab2:

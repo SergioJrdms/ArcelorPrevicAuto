@@ -508,7 +508,9 @@ def main():
 
                     # Salva no session state
                     st.session_state['df_resultado'] = df_resultado
+                    st.session_state['df_completo'] = df_para_analise  # <-- ADICIONAR ESTA LINHA
                     st.session_state['stats'] = stats
+                    st.session_state['mes_analisado'] = mes_selecionado  # <-- ADICIONAR ESTA LINHA
 
                     st.success("✅ Análise concluída!")
 
@@ -578,49 +580,82 @@ def main():
     with tab2:
         st.markdown("## 📈 Estatísticas Detalhadas")
 
-                # Seletor de visualização: Mensal ou Geral
-        col_filtro1, col_filtro2 = st.columns([1, 3])
-        
-        with col_filtro1:
-            tipo_visualizacao = st.radio(
-                "Tipo de Estatística:",
-                ["📊 Geral (Todos os Meses)", "📅 Mensal"],
-                help="Escolha entre visualizar estatísticas consolidadas ou de um mês específico"
-            )
-        
-        with col_filtro2:
-            if tipo_visualizacao == "📅 Mensal" and 'df_resultado' in st.session_state:
-                df_temp = st.session_state['df_resultado']
-                meses_disponiveis_stat = sorted(df_temp['ANO MES'].unique())
-                mes_estatistica = st.selectbox(
-                    "Selecione o mês:",
-                    meses_disponiveis_stat,
-                    index=len(meses_disponiveis_stat)-1,
-                    key="mes_estatistica"
-                )
-            else:
-                mes_estatistica = None
-        
-        st.markdown("---")
-
-        if 'df_resultado' in st.session_state:
-            df_res_original = st.session_state['df_resultado']
+        # Seletor de visualização: Mensal ou Geral
+        if 'df_completo' in st.session_state:
+            col_filtro1, col_filtro2 = st.columns([1, 3])
             
-            # Filtra dados conforme seleção
+            with col_filtro1:
+                tipo_visualizacao = st.radio(
+                    "Tipo de Estatística:",
+                    ["📊 Geral (Todos os Meses)", "📅 Mensal"],
+                    help="Escolha entre visualizar estatísticas consolidadas ou de um mês específico"
+                )
+            
+            with col_filtro2:
+                if tipo_visualizacao == "📅 Mensal":
+                    df_completo = st.session_state['df_completo']
+                    meses_disponiveis_stat = sorted(df_completo['ANO MES'].unique())
+                    
+                    # Define o mês inicial como o que foi analisado
+                    mes_inicial_idx = 0
+                    if 'mes_analisado' in st.session_state:
+                        mes_analisado = st.session_state['mes_analisado']
+                        if mes_analisado in meses_disponiveis_stat:
+                            mes_inicial_idx = meses_disponiveis_stat.index(mes_analisado)
+                    
+                    mes_estatistica = st.selectbox(
+                        "Selecione o mês:",
+                        meses_disponiveis_stat,
+                        index=mes_inicial_idx,
+                        key="mes_estatistica"
+                    )
+                else:
+                    mes_estatistica = None
+            
+            st.markdown("---")
+        
+        if 'df_completo' in st.session_state:
+            df_completo = st.session_state['df_completo']
+            
+            # Se for mensal, roda análise do mês selecionado
             if tipo_visualizacao == "📅 Mensal" and mes_estatistica:
-                df_res = df_res_original[df_res_original['ANO MES'] == mes_estatistica].copy()
+                with st.spinner(f'🔄 Processando estatísticas do mês {mes_estatistica}...'):
+                    df_res, stats = analisar_movimentacoes_mes(
+                        df_completo,
+                        df_codigos,
+                        regras_validas,
+                        constantes,
+                        mes_analise=mes_estatistica
+                    )
                 st.info(f"📅 Exibindo estatísticas do mês: **{mes_estatistica}**")
             else:
-                df_res = df_res_original.copy()
-                st.info(f"📊 Exibindo estatísticas consolidadas de **todos os meses**")
-            
-            # Recalcula stats para o período selecionado
-            stats = {
-                'total': df_res['CODIGO ORGANIZACAO NOME'].nunique(),
-                'ok': len(df_res[df_res['GRAVIDADE'] == 'OK']['CODIGO ORGANIZACAO NOME'].unique()),
-                'info': len(df_res[df_res['GRAVIDADE'] == 'INFO']['CODIGO ORGANIZACAO NOME'].unique()),
-                'erros': len(df_res[df_res['GRAVIDADE'] == 'ERRO']['CODIGO ORGANIZACAO NOME'].unique())
-            }
+                # Para "Geral", analisa todos os meses
+                with st.spinner('🔄 Processando estatísticas consolidadas...'):
+                    # Analisa cada mês e consolida
+                    todos_resultados = []
+                    meses_unicos = sorted(df_completo['ANO MES'].unique())
+                    
+                    for mes in meses_unicos:
+                        df_mes_result, _ = analisar_movimentacoes_mes(
+                            df_completo,
+                            df_codigos,
+                            regras_validas,
+                            constantes,
+                            mes_analise=mes
+                        )
+                        todos_resultados.append(df_mes_result)
+                    
+                    df_res = pd.concat(todos_resultados, ignore_index=True)
+                    
+                    # Recalcula stats consolidadas
+                    stats = {
+                        'total': df_res['CODIGO ORGANIZACAO NOME'].nunique(),
+                        'ok': len(df_res[df_res['GRAVIDADE'] == 'OK']['CODIGO ORGANIZACAO NOME'].unique()),
+                        'info': len(df_res[df_res['GRAVIDADE'] == 'INFO']['CODIGO ORGANIZACAO NOME'].unique()),
+                        'erros': len(df_res[df_res['GRAVIDADE'] == 'ERRO']['CODIGO ORGANIZACAO NOME'].unique())
+                    }
+                
+                st.info(f"📊 Exibindo estatísticas consolidadas de **{len(meses_unicos)} meses** ({min(meses_unicos)} a {max(meses_unicos)})")
 
             # ============================================================================
             # SEÇÃO 1: VISÃO GERAL COM KPIS

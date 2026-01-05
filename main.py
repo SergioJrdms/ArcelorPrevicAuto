@@ -169,7 +169,7 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
     df_mes = df_mov[df_mov['ANO MES'] == mes_analise].copy()
 
     if df_mes.empty:
-        return df_mes
+        return df_mes, {'total': 0, 'erros': 0, 'info': 0, 'ok': 0}
 
     df_mes['ANALISE'] = 'OK'
     df_mes['TIPO_PASSO'] = 'Indefinido'
@@ -422,67 +422,14 @@ def main():
                                 formatar_nome_participante)
                         )
 
+                        # SALVA O DATAFRAME COMPLETO LOGO APÓS O UPLOAD
+                        st.session_state['df_completo'] = df_para_analise.copy()
+
                         st.success(
                             f"✅ Arquivo carregado: {len(df_para_analise)} registros válidos")
 
                 except Exception as e:
                     st.error(f"❌ Erro ao processar arquivo: {e}")
-
-        else:  # Modo teste
-            st.info("🧪 **Modo de Teste Ativado** - Dados simulados serão gerados")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                n_participantes = st.slider(
-                    "Número de participantes:", 50, 500, 200)
-            with col2:
-                mes_teste = st.number_input(
-                    "Mês de análise:", 202401, 202512, 202501)
-
-            if st.button("🎲 Gerar Dados de Teste", type="primary"):
-                with st.spinner('🔄 Gerando dados...'):
-                    # Importa gerador (simplificado aqui)
-                    from datetime import datetime
-                    import random
-
-                    random.seed(42)
-                    dados = []
-
-                    for i in range(n_participantes):
-                        codigo_org = 50000000 + i
-                        nome = f"Participante Teste {i+1}"
-                        plano = random.choice([3, 4, 5, 6, 7])
-
-                        # Transição simples
-                        origem = random.choice([31100, 31200])
-                        destino = random.choice([11100, 21000, 22000])
-
-                        dados.append({
-                            'CODIGO_ORG': codigo_org,
-                            'NOME': nome,
-                            'PLANO': plano,
-                            'ANO MES': mes_teste,
-                            'CODIGO BENEFICIO': origem,
-                            'MOVIMENTO': 'SAIDA'
-                        })
-
-                        dados.append({
-                            'CODIGO_ORG': codigo_org,
-                            'NOME': nome,
-                            'PLANO': plano,
-                            'ANO MES': mes_teste,
-                            'CODIGO BENEFICIO': destino,
-                            'MOVIMENTO': 'ENTRADA'
-                        })
-
-                    df_para_analise = pd.DataFrame(dados)
-                    df_para_analise['CODIGO ORGANIZACAO NOME'] = (
-                        df_para_analise['CODIGO_ORG'].astype(
-                            str) + " - " + df_para_analise['NOME']
-                    )
-
-                    st.success(
-                        f"✅ {len(df_para_analise)} registros de teste gerados")
 
         # ANÁLISE
         if df_para_analise is not None and not df_para_analise.empty:
@@ -508,9 +455,8 @@ def main():
 
                     # Salva no session state
                     st.session_state['df_resultado'] = df_resultado
-                    st.session_state['df_completo'] = df_para_analise  # <-- ADICIONAR ESTA LINHA
                     st.session_state['stats'] = stats
-                    st.session_state['mes_analisado'] = mes_selecionado  # <-- ADICIONAR ESTA LINHA
+                    st.session_state['mes_analisado'] = mes_selecionado
 
                     st.success("✅ Análise concluída!")
 
@@ -550,32 +496,32 @@ def main():
                             height=400
                         )
 
-                        st.markdown("### 📥 Baixar Resultados da Análise")
+                    st.markdown("### 📥 Baixar Resultados da Análise")
 
-                        buffer = io.BytesIO()
-                        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                            # Aba com toda a análise
-                            df_resultado.to_excel(
-                                writer, index=False, sheet_name='Analise Completa')
+                    buffer = io.BytesIO()
+                    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                        # Aba com toda a análise
+                        df_resultado.to_excel(
+                            writer, index=False, sheet_name='Analise Completa')
 
-                            # Aba apenas com erros (opcional)
-                            erros = df_resultado[df_resultado['GRAVIDADE'] == 'ERRO']
-                            if not erros.empty:
-                                erros.to_excel(
-                                    writer, index=False, sheet_name='Erros')
+                        # Aba apenas com erros (opcional)
+                        erros = df_resultado[df_resultado['GRAVIDADE'] == 'ERRO']
+                        if not erros.empty:
+                            erros.to_excel(
+                                writer, index=False, sheet_name='Erros')
 
-                            # Aba de estatísticas (opcional)
-                            pd.DataFrame([stats]).to_excel(
-                                writer, index=False, sheet_name='Resumo')
+                        # Aba de estatísticas (opcional)
+                        pd.DataFrame([stats]).to_excel(
+                            writer, index=False, sheet_name='Resumo')
 
-                            writer.close()
+                        writer.close()
 
-                        st.download_button(
-                            label="📊 Download Análise Completa (XLSX)",
-                            data=buffer.getvalue(),
-                            file_name=f"analise_completa_{mes_selecionado}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
+                    st.download_button(
+                        label="📊 Download Análise Completa (XLSX)",
+                        data=buffer.getvalue(),
+                        file_name=f"analise_completa_{mes_selecionado}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
 
     with tab2:
         st.markdown("## 📈 Estatísticas Detalhadas")
@@ -597,7 +543,7 @@ def main():
                     meses_disponiveis_stat = sorted(df_completo['ANO MES'].unique())
                     
                     # Define o mês inicial como o que foi analisado
-                    mes_inicial_idx = 0
+                    mes_inicial_idx = len(meses_disponiveis_stat) - 1  # Último mês por padrão
                     if 'mes_analisado' in st.session_state:
                         mes_analisado = st.session_state['mes_analisado']
                         if mes_analisado in meses_disponiveis_stat:
@@ -1023,215 +969,230 @@ def main():
                     st.plotly_chart(fig, use_container_width=True)
 
                 with col2:
-                    st.markdown("#### 🏢 Erros por Plano")
+                    st.markdown("🏢 Erros por Plano")
+                if 'PLANO' in erros_df.columns:
+                    erros_plano = erros_df.groupby(
+                        'PLANO').size().reset_index(name='count')
 
-                    if 'PLANO' in erros_df.columns:
-                        erros_plano = erros_df.groupby(
-                            'PLANO').size().reset_index(name='count')
+                    fig = go.Figure(data=[go.Pie(
+                        labels=erros_plano['PLANO'],
+                        values=erros_plano['count'],
+                        hole=0.4,
+                        marker_colors=px.colors.sequential.Reds[2:],
+                        textinfo='label+value+percent'
+                    )])
 
-                        fig = go.Figure(data=[go.Pie(
-                            labels=erros_plano['PLANO'],
-                            values=erros_plano['count'],
-                            hole=0.4,
-                            marker_colors=px.colors.sequential.Reds[2:],
-                            textinfo='label+value+percent'
-                        )])
-
-                        fig.update_layout(
-                            title="Distribuição de Erros por Plano",
-                            height=400
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.info("ℹ️ Coluna PLANO não disponível")
-
-                # Ranking de códigos com erro
-                st.markdown("#### 🚨 Códigos Mais Problemáticos")
-
-                cod_erro = erros_df.groupby(
-                    'CODIGO BENEFICIO').size().reset_index(name='erros')
-                cod_erro = cod_erro.merge(
-                    df_codigos[['CODIGO', 'DESCRICAO']], left_on='CODIGO BENEFICIO', right_on='CODIGO')
-                cod_erro = cod_erro.sort_values(
-                    'erros', ascending=False).head(10)
-
-                fig = go.Figure(data=[go.Bar(
-                    x=cod_erro['DESCRICAO'],
-                    y=cod_erro['erros'],
-                    text=cod_erro['erros'],
-                    textposition='auto',
-                    marker_color='crimson'
-                )])
-
-                fig.update_layout(
-                    title="Top 10 Códigos com Mais Erros",
-                    xaxis_title="Código",
-                    yaxis_title="Quantidade de Erros",
-                    height=400,
-                    xaxis_tickangle=-45
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
-            st.markdown("---")
-
-            # ============================================================================
-            # SEÇÃO 6: INSIGHTS E RECOMENDAÇÕES
-            # ============================================================================
-            st.markdown("### 💡 Insights e Recomendações")
-
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                st.markdown("#### ✅ Pontos Fortes")
-                if taxa_conformidade >= 90:
-                    st.success("✓ Excelente taxa de conformidade")
-                if media_movs_participante < 5:
-                    st.success(
-                        "✓ Processos estão sendo concluídos rapidamente")
-                if stats.get('info', 0) < stats.get('total', 1) * 0.3:
-                    st.success("✓ Poucos processos pendentes")
-
-            with col2:
-                st.markdown("#### ⚠️ Pontos de Atenção")
-                if taxa_erro > 10:
-                    st.warning(
-                        f"⚠ Taxa de erro acima de 10% ({taxa_erro:.1f}%)")
-                if stats.get('info', 0) > stats.get('total', 1) * 0.3:
-                    st.warning(
-                        f"⚠ Muitos processos em andamento ({stats.get('info', 0)})")
-                if media_movs_participante > 6:
-                    st.warning("⚠ Muitas movimentações por participante")
-
-            with col3:
-                st.markdown("#### 🎯 Próximos Passos")
-                if taxa_erro > 5:
-                    st.info("→ Revisar casos com erro crítico")
-                if stats.get('info', 0) > 20:
-                    st.info(
-                        f"→ Acompanhar {stats.get('info', 0)} processos pendentes")
-                st.info("→ Monitorar tendências mensais")
-
-        else:
-            st.info("ℹ️ Execute uma análise primeiro na aba 'Análise'")
-
-
-            st.markdown("---")
-            st.markdown("### 📥 Exportar Estatísticas")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.info("""
-                **📊 O que será exportado:**
-                - Resumo geral (KPIs)
-                - Gráficos de distribuição
-                - Análise por plano
-                - Top códigos utilizados
-                - Análise de transições
-                - Detalhamento de erros (se houver)
-                """)
-            
-            with col2:
-                if st.button("📄 Gerar Relatório PDF", type="primary", use_container_width=True):
-                    st.warning("⚠️ **Funcionalidade em desenvolvimento**\n\nA exportação em PDF das estatísticas será implementada em breve. Por enquanto, utilize a exportação Excel disponível na aba 'Análise'.")
-                    
-                    # TODO: Implementar geração de PDF com matplotlib/plotly
-                    # Sugestão de bibliotecas: reportlab, matplotlib para gráficos estáticos
-                    # ou plotly + kaleido para converter gráficos plotly em imagens
-
-    with tab3:
-        st.markdown("## 🔍 Busca de Participante")
-
-        if 'df_resultado' in st.session_state:
-            df_res = st.session_state['df_resultado']
-
-            nome_busca = st.text_input(
-                "Digite o nome ou código do participante:")
-
-            if nome_busca:
-                resultados = df_res[df_res['CODIGO ORGANIZACAO NOME'].str.contains(
-                    nome_busca, case=False, na=False)]
-
-                if not resultados.empty:
-                    st.success(
-                        f"✅ {len(resultados)} registro(s) encontrado(s)")
-
-                    for participante in resultados['CODIGO ORGANIZACAO NOME'].unique():
-                        with st.expander(f"👤 {participante}"):
-                            dados_part = resultados[resultados['CODIGO ORGANIZACAO NOME']
-                                                    == participante]
-                            st.dataframe(
-                                dados_part[['PLANO', 'CODIGO BENEFICIO',
-                                            'MOVIMENTO', 'GRAVIDADE', 'ANALISE']],
-                                use_container_width=True
-                            )
+                    fig.update_layout(
+                        title="Distribuição de Erros por Plano",
+                        height=400
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.warning("⚠️ Nenhum participante encontrado")
-        else:
-            st.info("ℹ️ Execute uma análise primeiro")
+                    st.info("ℹ️ Coluna PLANO não disponível")
 
-    with tab4:
-        st.markdown("## 📚 Documentação")
+            # Ranking de códigos com erro
+            st.markdown("#### 🚨 Códigos Mais Problemáticos")
 
-        st.markdown("""
-        ### 🎯 Objetivo do Sistema
-        
-        Este sistema automatiza a validação de movimentações previdenciárias, identificando:
-        - ✅ Transições válidas conforme regras de negócio
-        - ❌ Erros e inconsistências
-        - ℹ️ Processos em andamento
-        
-        ### 📋 Códigos Principais
-        """)
+            cod_erro = erros_df.groupby(
+                'CODIGO BENEFICIO').size().reset_index(name='erros')
+            cod_erro = cod_erro.merge(
+                df_codigos[['CODIGO', 'DESCRICAO']], left_on='CODIGO BENEFICIO', right_on='CODIGO')
+            cod_erro = cod_erro.sort_values(
+                'erros', ascending=False).head(10)
 
-        st.dataframe(df_codigos, use_container_width=True, height=400)
+            fig = go.Figure(data=[go.Bar(
+                x=cod_erro['DESCRICAO'],
+                y=cod_erro['erros'],
+                text=cod_erro['erros'],
+                textposition='auto',
+                marker_color='crimson'
+            )])
 
-        st.markdown("""
-        ### 🔄 Como Usar
-        
-        1. **Upload**: Carregue seu arquivo Excel/CSV ou use dados de teste
-        2. **Análise**: Selecione o mês e execute a análise
-        3. **Resultados**: Visualize métricas, gráficos e exporte relatórios
-        4. **Busca**: Encontre participantes específicos
-        5. **Estatísticas**: Explore padrões e tendências
-        
-        ### ⚠️ Tipos de Alertas
-        
-        - **✅ OK**: Transição válida conforme regras
-        - **ℹ️ INFO**: Processo em andamento (normal)
-        - **❌ ERRO**: Inconsistência que precisa correção
-        """)
-        
-        st.markdown("""
-        ### ⚙️ Regras Especiais de Validação
-        
-        #### 🔄 Transições com Múltiplas Entradas
-        
-        **Caso 1: Saída de Ativo para BPD/AutoPatrocínio**
-        - ✅ **Válido**: 1 saída (31200) + 2 entradas (21000 + 31300)
-        - Participante sai de ativo e entra em BPD, registrando também na população
-        
-        #### 🎯 Contas com Lançamentos Independentes
-        
-        **Portabilidade (24100 e 24200)**
-        - ✅ Podem existir **sem outras movimentações**
-        - ✅ São **sempre ENTRADA** (nunca saída)
-        - 24100: Portabilidade Saída (entrada da saída de recurso)
-        - 24200: Portabilidade Entrada (entrada de recurso)
-        
-        **Auxílio Funeral (13000)**
-        - ✅ Pode existir **isolado ou junto** com outras movimentações
-        - ✅ É **sempre ENTRADA** (nunca saída)
-        - ✅ Pode ocorrer com qualquer status (ativo, aposentado, pensionista)
-        - Exemplo: Aposentado continua ativo, mas recebe auxílio funeral de cônjuge
-        
-        **Outras Contas de Pagamento Único**
-        - 13000: Auxílio Único (Natalidade/Funeral)
-        - 15000: Pecúlio
-        - 16000: Outros Benefícios de Prestação Única
-        - 23000: Resgate Total
-        """)
+            fig.update_layout(
+                title="Top 10 Códigos com Mais Erros",
+                xaxis_title="Código",
+                yaxis_title="Quantidade de Erros",
+                height=400,
+                xaxis_tickangle=-45
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
+        st.markdown("---")
 
-if __name__ == "__main__":
-    main()
+        # ============================================================================
+        # SEÇÃO 6: INSIGHTS E RECOMENDAÇÕES
+        # ============================================================================
+        st.markdown("### 💡 Insights e Recomendações")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.markdown("#### ✅ Pontos Fortes")
+            if taxa_conformidade >= 90:
+                st.success("✓ Excelente taxa de conformidade")
+            if media_movs_participante < 5:
+                st.success(
+                    "✓ Processos estão sendo concluídos rapidamente")
+            if stats.get('info', 0) < stats.get('total', 1) * 0.3:
+                st.success("✓ Poucos processos pendentes")
+
+        with col2:
+            st.markdown("#### ⚠️ Pontos de Atenção")
+            if taxa_erro > 10:
+                st.warning(
+                    f"⚠ Taxa de erro acima de 10% ({taxa_erro:.1f}%)")
+            if stats.get('info', 0) > stats.get('total', 1) * 0.3:
+                st.warning(
+                    f"⚠ Muitos processos em andamento ({stats.get('info', 0)})")
+            if media_movs_participante > 6:
+                st.warning("⚠ Muitas movimentações por participante")
+
+        with col3:
+            st.markdown("#### 🎯 Próximos Passos")
+            if taxa_erro > 5:
+                st.info("→ Revisar casos com erro crítico")
+            if stats.get('info', 0) > 20:
+                st.info(
+                    f"→ Acompanhar {stats.get('info', 0)} processos pendentes")
+            st.info("→ Monitorar tendências mensais")
+
+        st.markdown("---")
+        st.markdown("### 📥 Exportar Estatísticas")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.info("""
+            **📊 O que será exportado:**
+            - Resumo geral (KPIs)
+            - Gráficos de distribuição
+            - Análise por plano
+            - Top códigos utilizados
+            - Análise de transições
+            - Detalhamento de erros (se houver)
+            """)
+        
+        with col2:
+            if st.button("📄 Gerar Relatório PDF", type="primary", use_container_width=True):
+                st.warning("⚠️ **Funcionalidade em desenvolvimento**\n\nA exportação em PDF das estatísticas será implementada em breve. Por enquanto, utilize a exportação Excel disponível na aba 'Análise'.")
+
+    else:
+        st.info("ℹ️ Execute uma análise primeiro na aba 'Análise'")
+
+with tab3:
+    st.markdown("## 🔍 Busca de Participante")
+
+    if 'df_resultado' in st.session_state:
+        df_res = st.session_state['df_resultado']
+
+        nome_busca = st.text_input(
+            "Digite o nome ou código do participante:")
+
+        if nome_busca:
+            resultados = df_res[df_res['CODIGO ORGANIZACAO NOME'].str.contains(
+                nome_busca, case=False, na=False)]
+
+            if not resultados.empty:
+                st.success(
+                    f"✅ {len(resultados)} registro(s) encontrado(s)")
+
+                for participante in resultados['CODIGO ORGANIZACAO NOME'].unique():
+                    with st.expander(f"👤 {participante}"):
+                        dados_part = resultados[resultados['CODIGO ORGANIZACAO NOME']
+                                                == participante]
+                        st.dataframe(
+                            dados_part[['PLANO', 'CODIGO BENEFICIO',
+                                        'MOVIMENTO', 'GRAVIDADE', 'ANALISE']],
+                            use_container_width=True
+                        )
+            else:
+                st.warning("⚠️ Nenhum participante encontrado")
+    else:
+        st.info("ℹ️ Execute uma análise primeiro")
+
+with tab4:
+    st.markdown("## 📚 Documentação")
+
+    st.markdown("""
+    ### 🎯 Objetivo do Sistema
+    
+    Este sistema automatiza a validação de movimentações previdenciárias, identificando:
+    - ✅ Transições válidas conforme regras de negócio
+    - ❌ Erros e inconsistências
+    - ℹ️ Processos em andamento
+    
+    ### 📋 Códigos Principais
+    """)
+
+    st.dataframe(df_codigos, use_container_width=True, height=400)
+
+    st.markdown("""
+    ### 🔄 Como Usar
+    
+    1. **Upload**: Carregue seu arquivo Excel/CSV ou use dados de teste
+    2. **Análise**: Selecione o mês e execute a análise
+    3. **Resultados**: Visualize métricas, gráficos e exporte relatórios
+    4. **Busca**: Encontre participantes específicos
+    5. **Estatísticas**: Explore padrões e tendências
+    
+    ### ⚠️ Tipos de Alertas
+    
+    - **✅ OK**: Transição válida conforme regras
+    - **ℹ️ INFO**: Processo em andamento (normal)
+    - **❌ ERRO**: Inconsistência que precisa correção
+    """)
+    
+    st.markdown("""
+    ### ⚙️ Regras Especiais de Validação
+    
+    #### 🔄 Transições com Múltiplas Entradas
+    
+    **Caso 1: Saída de Ativo para BPD/AutoPatrocínio**
+    - ✅ **Válido**: 1 saída (31200) + 2 entradas (21000 + 31300)
+    - Participante sai de ativo e entra em BPD, registrando também na população
+    
+    #### 🎯 Contas com Lançamentos Independentes
+    
+    **Portabilidade (24100 e 24200)**
+    - ✅ Podem existir **sem outras movimentações**
+    - ✅ São **sempre ENTRADA** (nunca saída)
+    - 24100: Portabilidade Saída (entrada da saída de recurso)
+    - 24200: Portabilidade Entrada (entrada de recurso)
+    
+    **Auxílio Funeral (13000)**
+    - ✅ Pode existir **isolado ou junto** com outras movimentações
+    - ✅ É **sempre ENTRADA** (nunca saída)
+    - ✅ Pode ocorrer com qualquer status (ativo, aposentado, pensionista)
+    - Exemplo: Aposentado continua ativo, mas recebe auxílio funeral de cônjuge
+    
+    **Outras Contas de Pagamento Único**
+    - 13000: Auxílio Único (Natalidade/Funeral)
+    - 15000: Pecúlio
+    - 16000: Outros Benefícios de Prestação Única
+    - 23000: Resgate Total
+    """)
+if name == "main":
+main()
+
+---
+
+## 🔴 IMPORTANTE - AÇÃO NECESSÁRIA
+
+O código está correto, mas você precisa **fazer UMA dessas ações** para ver todos os meses:
+
+### Opção 1 (Mais rápida):
+1. **Recarregue a página** (aperte F5 no navegador)
+2. Faça o upload do arquivo novamente
+
+### Opção 2:
+1. Feche a aba do navegador
+2. Abra novamente
+3. Faça o upload do arquivo
+
+---
+
+**Por quê isso é necessário?**
+
+O Streamlit mantém os dados em memória (session_state). Como você já tinha feito upload antes com o código antigo, o `df_completo` salvo só tinha 1 mês. Agora com o novo código, ele salva TODOS os meses do arquivo logo no upload, mas você precisa **recarregar para resetar a memória** e fazer o upload novamente.
+
+Depois de recarregar e fazer o upload, você verá todos os meses disponíveis no dropdown! 📅

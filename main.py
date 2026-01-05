@@ -249,9 +249,20 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
             stats['erros'] += 1
 
         elif len(entradas_liquidas) > 1:
-            msg = f"ERRO: Múltiplas entradas finais"
-            gravidade = 'ERRO'
-            stats['erros'] += 1
+            # EXCEÇÃO: Saída de Ativo (31200) para BPD/AutoPatrocínio (21000 + 31300) é válido
+            if 21000 in entradas_liquidas and 31300 in entradas_liquidas and len(entradas_liquidas) == 2:
+                if 31200 in saidas_liquidas:
+                    msg = f"OK: Transição válida de Ativo para BPD/AutoPatrocínio (entrada em população)"
+                    gravidade = 'OK'
+                    stats['ok'] += 1
+                else:
+                    msg = f"ERRO: Múltiplas entradas finais"
+                    gravidade = 'ERRO'
+                    stats['erros'] += 1
+            else:
+                msg = f"ERRO: Múltiplas entradas finais"
+                gravidade = 'ERRO'
+                stats['erros'] += 1
 
         elif len(saidas_liquidas) == 1 and len(entradas_liquidas) == 1:
             cod_origem = list(saidas_liquidas)[0]
@@ -273,16 +284,23 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
 
         elif len(saidas_liquidas) == 0 and len(entradas_liquidas) > 0:
             cod_entrada = list(entradas_liquidas)[0]
-            plano = group['PLANO'].iloc[0] if 'PLANO' in group.columns else None
-
-            if plano == 5 and cod_entrada in constantes['CODIGOS_ADMISSAO']:
-                msg = f"INFO: Nova admissão no Plano 5"
-                gravidade = 'INFO'
-                stats['info'] += 1
+            
+            # EXCEÇÃO: Portabilidade (24100, 24200) e Auxílio Funeral (13000) podem existir isolados
+            if cod_entrada in {24100, 24200, 13000}:
+                msg = f"OK: Lançamento isolado válido ({get_descricao(cod_entrada, df_codigos)})"
+                gravidade = 'OK'
+                stats['ok'] += 1
             else:
-                msg = f"INFO: Processo em andamento"
-                gravidade = 'INFO'
-                stats['info'] += 1
+                plano = group['PLANO'].iloc[0] if 'PLANO' in group.columns else None
+                
+                if plano == 5 and cod_entrada in constantes['CODIGOS_ADMISSAO']:
+                    msg = f"INFO: Nova admissão no Plano 5"
+                    gravidade = 'INFO'
+                    stats['info'] += 1
+                else:
+                    msg = f"INFO: Processo em andamento"
+                    gravidade = 'INFO'
+                    stats['info'] += 1
 
         elif len(saidas_liquidas) > 0 and len(entradas_liquidas) == 0:
             msg = f"INFO: Processo em andamento (aguardando conclusão)"
@@ -560,9 +578,49 @@ def main():
     with tab2:
         st.markdown("## 📈 Estatísticas Detalhadas")
 
+                # Seletor de visualização: Mensal ou Geral
+        col_filtro1, col_filtro2 = st.columns([1, 3])
+        
+        with col_filtro1:
+            tipo_visualizacao = st.radio(
+                "Tipo de Estatística:",
+                ["📊 Geral (Todos os Meses)", "📅 Mensal"],
+                help="Escolha entre visualizar estatísticas consolidadas ou de um mês específico"
+            )
+        
+        with col_filtro2:
+            if tipo_visualizacao == "📅 Mensal" and 'df_resultado' in st.session_state:
+                df_temp = st.session_state['df_resultado']
+                meses_disponiveis_stat = sorted(df_temp['ANO MES'].unique())
+                mes_estatistica = st.selectbox(
+                    "Selecione o mês:",
+                    meses_disponiveis_stat,
+                    index=len(meses_disponiveis_stat)-1,
+                    key="mes_estatistica"
+                )
+            else:
+                mes_estatistica = None
+        
+        st.markdown("---")
+
         if 'df_resultado' in st.session_state:
-            df_res = st.session_state['df_resultado']
-            stats = st.session_state.get('stats', {})
+            df_res_original = st.session_state['df_resultado']
+            
+            # Filtra dados conforme seleção
+            if tipo_visualizacao == "📅 Mensal" and mes_estatistica:
+                df_res = df_res_original[df_res_original['ANO MES'] == mes_estatistica].copy()
+                st.info(f"📅 Exibindo estatísticas do mês: **{mes_estatistica}**")
+            else:
+                df_res = df_res_original.copy()
+                st.info(f"📊 Exibindo estatísticas consolidadas de **todos os meses**")
+            
+            # Recalcula stats para o período selecionado
+            stats = {
+                'total': df_res['CODIGO ORGANIZACAO NOME'].nunique(),
+                'ok': len(df_res[df_res['GRAVIDADE'] == 'OK']['CODIGO ORGANIZACAO NOME'].unique()),
+                'info': len(df_res[df_res['GRAVIDADE'] == 'INFO']['CODIGO ORGANIZACAO NOME'].unique()),
+                'erros': len(df_res[df_res['GRAVIDADE'] == 'ERRO']['CODIGO ORGANIZACAO NOME'].unique())
+            }
 
             # ============================================================================
             # SEÇÃO 1: VISÃO GERAL COM KPIS
@@ -1021,6 +1079,31 @@ def main():
         else:
             st.info("ℹ️ Execute uma análise primeiro na aba 'Análise'")
 
+
+            st.markdown("---")
+            st.markdown("### 📥 Exportar Estatísticas")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.info("""
+                **📊 O que será exportado:**
+                - Resumo geral (KPIs)
+                - Gráficos de distribuição
+                - Análise por plano
+                - Top códigos utilizados
+                - Análise de transições
+                - Detalhamento de erros (se houver)
+                """)
+            
+            with col2:
+                if st.button("📄 Gerar Relatório PDF", type="primary", use_container_width=True):
+                    st.warning("⚠️ **Funcionalidade em desenvolvimento**\n\nA exportação em PDF das estatísticas será implementada em breve. Por enquanto, utilize a exportação Excel disponível na aba 'Análise'.")
+                    
+                    # TODO: Implementar geração de PDF com matplotlib/plotly
+                    # Sugestão de bibliotecas: reportlab, matplotlib para gráficos estáticos
+                    # ou plotly + kaleido para converter gráficos plotly em imagens
+
     with tab3:
         st.markdown("## 🔍 Busca de Participante")
 
@@ -1082,6 +1165,36 @@ def main():
         - **✅ OK**: Transição válida conforme regras
         - **ℹ️ INFO**: Processo em andamento (normal)
         - **❌ ERRO**: Inconsistência que precisa correção
+        """)
+        
+        st.markdown("""
+        ### ⚙️ Regras Especiais de Validação
+        
+        #### 🔄 Transições com Múltiplas Entradas
+        
+        **Caso 1: Saída de Ativo para BPD/AutoPatrocínio**
+        - ✅ **Válido**: 1 saída (31200) + 2 entradas (21000 + 31300)
+        - Participante sai de ativo e entra em BPD, registrando também na população
+        
+        #### 🎯 Contas com Lançamentos Independentes
+        
+        **Portabilidade (24100 e 24200)**
+        - ✅ Podem existir **sem outras movimentações**
+        - ✅ São **sempre ENTRADA** (nunca saída)
+        - 24100: Portabilidade Saída (entrada da saída de recurso)
+        - 24200: Portabilidade Entrada (entrada de recurso)
+        
+        **Auxílio Funeral (13000)**
+        - ✅ Pode existir **isolado ou junto** com outras movimentações
+        - ✅ É **sempre ENTRADA** (nunca saída)
+        - ✅ Pode ocorrer com qualquer status (ativo, aposentado, pensionista)
+        - Exemplo: Aposentado continua ativo, mas recebe auxílio funeral de cônjuge
+        
+        **Outras Contas de Pagamento Único**
+        - 13000: Auxílio Único (Natalidade/Funeral)
+        - 15000: Pecúlio
+        - 16000: Outros Benefícios de Prestação Única
+        - 23000: Resgate Total
         """)
 
 

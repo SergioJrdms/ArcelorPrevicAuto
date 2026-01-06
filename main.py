@@ -366,7 +366,14 @@ def analisar_movimentacoes_periodo(df_mov, df_codigos, regras_validas, constante
 def _mpl_fig_to_png_bytes(fig):
     import matplotlib.pyplot as plt
     bio = io.BytesIO()
-    fig.savefig(bio, format='png', dpi=200, bbox_inches='tight')
+    fig.savefig(
+        bio,
+        format='png',
+        dpi=300,
+        bbox_inches='tight',
+        facecolor='white',
+        edgecolor='white'
+    )
     plt.close(fig)
     bio.seek(0)
     return bio.getvalue()
@@ -433,6 +440,7 @@ def gerar_pdf_relatorio_simples(titulo, subtitulo, kpis, df_res):
 
 def gerar_pdf_relatorio_visual(titulo, subtitulo, kpis, df_res, df_codigos):
     import matplotlib.pyplot as plt
+    import matplotlib as mpl
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.units import cm
@@ -520,6 +528,72 @@ def gerar_pdf_relatorio_visual(titulo, subtitulo, kpis, df_res, df_codigos):
         canvas.drawRightString(width - 2 * cm, 1.1 * cm, f"Página {_doc.page}")
         canvas.restoreState()
 
+    def _aplicar_estilo_mpl():
+        try:
+            plt.style.use('seaborn-v0_8-whitegrid')
+        except Exception:
+            try:
+                plt.style.use('ggplot')
+            except Exception:
+                pass
+
+        mpl.rcParams.update({
+            'figure.facecolor': 'white',
+            'axes.facecolor': 'white',
+            'savefig.facecolor': 'white',
+            'axes.edgecolor': '#E5E7EB',
+            'axes.labelcolor': '#111827',
+            'text.color': '#111827',
+            'xtick.color': '#374151',
+            'ytick.color': '#374151',
+            'grid.color': '#E5E7EB',
+            'grid.alpha': 0.6,
+            'axes.titleweight': 'bold',
+            'axes.titlesize': 14,
+            'axes.labelsize': 11,
+            'font.size': 11,
+            'legend.frameon': False,
+        })
+
+    def _despine(ax):
+        for s in ['top', 'right', 'left', 'bottom']:
+            try:
+                ax.spines[s].set_visible(False)
+            except Exception:
+                pass
+
+    def _fmt_int(v):
+        try:
+            return f"{int(v):,}".replace(',', '.')
+        except Exception:
+            return str(v)
+
+    def _tabela_estilizada(data, col_widths=None, header_rows=1):
+        t = Table(data, colWidths=col_widths, hAlign='LEFT')
+        style_cmds = [
+            ("BACKGROUND", (0, 0), (-1, header_rows - 1), colors.HexColor("#0B1F3A")),
+            ("TEXTCOLOR", (0, 0), (-1, header_rows - 1), colors.white),
+            ("FONTNAME", (0, 0), (-1, header_rows - 1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, header_rows - 1), 9),
+            ("FONTSIZE", (0, header_rows), (-1, -1), 8.5),
+            ("TEXTCOLOR", (0, header_rows), (-1, -1), colors.HexColor("#111827")),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#E5E7EB")),
+            ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#D1D5DB")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]
+        # Zebra
+        for r in range(header_rows, len(data)):
+            if (r - header_rows) % 2 == 0:
+                style_cmds.append(("BACKGROUND", (0, r), (-1, r), colors.HexColor("#F9FAFB")))
+            else:
+                style_cmds.append(("BACKGROUND", (0, r), (-1, r), colors.white))
+        t.setStyle(TableStyle(style_cmds))
+        return t
+
     def add_mpl_fig(fig, caption=None, max_height_cm=11.0):
         img_bytes = _mpl_fig_to_png_bytes(fig)
         bio = io.BytesIO(img_bytes)
@@ -588,33 +662,73 @@ def gerar_pdf_relatorio_visual(titulo, subtitulo, kpis, df_res, df_codigos):
     story.append(Spacer(1, 0.8 * cm))
 
     story.append(Paragraph("Visão Geral", section_style))
-    try:
-        plt.style.use('ggplot')
-    except Exception:
-        pass
+    _aplicar_estilo_mpl()
 
     grav = df_res.groupby('GRAVIDADE').size().reindex(['OK', 'INFO', 'ERRO']).fillna(0).astype(int)
-    fig, ax = plt.subplots(figsize=(7.2, 4.2))
-    colors_grav = ['#16A34A', '#0891B2', '#DC2626']
-    ax.pie(grav.values, labels=grav.index.tolist(), autopct='%1.1f%%', startangle=90, colors=colors_grav)
+
+    # Tabela resumo de gravidade
+    total_geral = int(grav.sum()) if not grav.empty else 0
+    tab_grav = [["Gravidade", "Quantidade", "%"]]
+    for g in ['OK', 'INFO', 'ERRO']:
+        qtd = int(grav.get(g, 0))
+        perc = (qtd / total_geral * 100) if total_geral else 0
+        tab_grav.append([g, _fmt_int(qtd), f"{perc:.1f}%"])
+    story.append(_tabela_estilizada(tab_grav, col_widths=[doc.width * 0.34, doc.width * 0.33, doc.width * 0.33]))
+    story.append(Spacer(1, 0.7 * cm))
+
+    # Gráfico de gravidade (donut)
+    fig, ax = plt.subplots(figsize=(7.6, 4.4))
+    colors_grav = ['#22C55E', '#06B6D4', '#EF4444']
+    wedges, texts, autotexts = ax.pie(
+        grav.values,
+        labels=grav.index.tolist(),
+        autopct=lambda p: f"{p:.1f}%\n({_fmt_int(round(p/100*total_geral))})" if total_geral else "0%",
+        startangle=90,
+        colors=colors_grav,
+        textprops={'color': '#111827', 'fontsize': 10},
+        wedgeprops={'width': 0.42, 'edgecolor': 'white'}
+    )
     ax.set_title('Distribuição de Gravidade')
+    ax.axis('equal')
     add_mpl_fig(fig)
 
     if 'PLANO' in df_res.columns:
         plano_grav = df_res.groupby(['PLANO', 'GRAVIDADE']).size().unstack(fill_value=0)
         plano_grav = plano_grav.reindex(columns=['OK', 'INFO', 'ERRO'], fill_value=0)
-        fig, ax = plt.subplots(figsize=(8.5, 4.6))
+
+        # Tabela por plano (Top 12)
+        plano_tab = plano_grav.copy()
+        plano_tab['TOTAL'] = plano_tab.sum(axis=1)
+        plano_tab = plano_tab.sort_values('TOTAL', ascending=False).head(12)
+        tab_plano = [["Plano", "OK", "INFO", "ERRO", "Total"]]
+        for plano, row in plano_tab.iterrows():
+            tab_plano.append([
+                str(plano),
+                _fmt_int(row.get('OK', 0)),
+                _fmt_int(row.get('INFO', 0)),
+                _fmt_int(row.get('ERRO', 0)),
+                _fmt_int(row.get('TOTAL', 0)),
+            ])
+        story.append(_tabela_estilizada(
+            tab_plano,
+            col_widths=[doc.width * 0.34, doc.width * 0.165, doc.width * 0.165, doc.width * 0.165, doc.width * 0.165]
+        ))
+        story.append(Spacer(1, 0.7 * cm))
+
+        fig, ax = plt.subplots(figsize=(9.2, 4.9))
         x = np.arange(len(plano_grav.index))
         w = 0.25
-        ax.bar(x - w, plano_grav['OK'].values, width=w, label='OK', color='#16A34A')
-        ax.bar(x, plano_grav['INFO'].values, width=w, label='INFO', color='#0891B2')
-        ax.bar(x + w, plano_grav['ERRO'].values, width=w, label='ERRO', color='#DC2626')
+        ax.bar(x - w, plano_grav['OK'].values, width=w, label='OK', color='#22C55E')
+        ax.bar(x, plano_grav['INFO'].values, width=w, label='INFO', color='#06B6D4')
+        ax.bar(x + w, plano_grav['ERRO'].values, width=w, label='ERRO', color='#EF4444')
         ax.set_xticks(x)
         ax.set_xticklabels([str(p) for p in plano_grav.index], rotation=0)
         ax.set_title('Movimentações por Plano e Status')
         ax.set_xlabel('Plano')
         ax.set_ylabel('Quantidade')
-        ax.legend()
+        ax.legend(ncol=3, loc='upper right')
+        ax.grid(axis='y', linestyle='-', linewidth=0.6)
+        _despine(ax)
         add_mpl_fig(fig)
 
     story.append(PageBreak())
@@ -627,19 +741,51 @@ def gerar_pdf_relatorio_visual(titulo, subtitulo, kpis, df_res, df_codigos):
         right_on='CODIGO',
         how='left'
     )
+    total_mov = float(mov_por_codigo['count'].sum()) if not mov_por_codigo.empty else 0.0
+    mov_por_codigo['percentual'] = (mov_por_codigo['count'] / total_mov * 100) if total_mov else 0.0
     top10 = mov_por_codigo.nlargest(10, 'count').sort_values('count', ascending=True)
+
+    # Tabela Top 10
+    tab_top10 = [["Código", "Descrição", "Tipo", "Qtd", "%"]]
+    for _, r in top10.sort_values('count', ascending=False).iterrows():
+        tab_top10.append([
+            str(int(r['CODIGO BENEFICIO'])) if pd.notna(r.get('CODIGO BENEFICIO')) else "-",
+            str(r.get('DESCRICAO') if pd.notna(r.get('DESCRICAO')) else "-")[:60],
+            str(r.get('TIPO') if pd.notna(r.get('TIPO')) else "-"),
+            _fmt_int(r.get('count', 0)),
+            f"{float(r.get('percentual', 0.0)):.1f}%",
+        ])
+    story.append(_tabela_estilizada(
+        tab_top10,
+        col_widths=[doc.width * 0.13, doc.width * 0.50, doc.width * 0.17, doc.width * 0.10, doc.width * 0.10]
+    ))
+    story.append(Spacer(1, 0.7 * cm))
+
     fig, ax = plt.subplots(figsize=(9.0, 5.0))
-    ax.barh(top10['DESCRICAO'].fillna(top10['CODIGO BENEFICIO'].astype(str)).astype(str), top10['count'].values, color='#1D4ED8')
+    labels = top10['DESCRICAO'].fillna(top10['CODIGO BENEFICIO'].astype(str)).astype(str).map(lambda s: (s[:42] + '…') if len(s) > 43 else s)
+    ax.barh(labels, top10['count'].values, color='#2563EB')
     ax.set_title('Top 10 Códigos Mais Utilizados')
     ax.set_xlabel('Quantidade')
+    ax.grid(axis='x', linestyle='-', linewidth=0.6)
+    _despine(ax)
     add_mpl_fig(fig)
 
     tipo_dist = mov_por_codigo.groupby('TIPO')['count'].sum().sort_values(ascending=True)
     if not tipo_dist.empty:
+        tab_tipo = [["Tipo", "Quantidade", "%"]]
+        total_tipo = float(tipo_dist.sum()) if float(tipo_dist.sum()) else 0.0
+        for tipo, qtd in tipo_dist.sort_values(ascending=False).items():
+            perc = (float(qtd) / total_tipo * 100) if total_tipo else 0
+            tab_tipo.append([str(tipo), _fmt_int(qtd), f"{perc:.1f}%"])
+        story.append(_tabela_estilizada(tab_tipo, col_widths=[doc.width * 0.50, doc.width * 0.25, doc.width * 0.25]))
+        story.append(Spacer(1, 0.7 * cm))
+
         fig, ax = plt.subplots(figsize=(7.8, 4.4))
-        ax.barh(tipo_dist.index.astype(str), tipo_dist.values, color='#F97316')
+        ax.barh(tipo_dist.index.astype(str), tipo_dist.values, color='#F59E0B')
         ax.set_title('Distribuição por Tipo de Código')
         ax.set_xlabel('Quantidade')
+        ax.grid(axis='x', linestyle='-', linewidth=0.6)
+        _despine(ax)
         add_mpl_fig(fig)
 
     transicoes = df_res[df_res['MOVIMENTO'] == 'SAIDA'].merge(
@@ -652,14 +798,34 @@ def gerar_pdf_relatorio_visual(titulo, subtitulo, kpis, df_res, df_codigos):
         story.append(Paragraph("Transições", section_style))
         trans_grouped = transicoes.groupby(['CODIGO BENEFICIO_origem', 'CODIGO BENEFICIO_destino']).size().reset_index(name='count')
         trans_grouped = trans_grouped.nlargest(15, 'count').sort_values('count', ascending=True)
+
+        # Tabela de transições (Top 15)
+        codigo_to_desc = df_codigos.set_index('CODIGO')['DESCRICAO'].to_dict() if df_codigos is not None and not df_codigos.empty else {}
+        tab_trans = [["Origem", "Destino", "Qtd"]]
+        for _, r in trans_grouped.sort_values('count', ascending=False).iterrows():
+            o = int(r['CODIGO BENEFICIO_origem'])
+            d = int(r['CODIGO BENEFICIO_destino'])
+            o_desc = str(codigo_to_desc.get(o, ""))
+            d_desc = str(codigo_to_desc.get(d, ""))
+            origem = f"{o} - {o_desc[:35]}".strip(" -")
+            destino = f"{d} - {d_desc[:35]}".strip(" -")
+            tab_trans.append([origem, destino, _fmt_int(r['count'])])
+        story.append(_tabela_estilizada(
+            tab_trans,
+            col_widths=[doc.width * 0.44, doc.width * 0.44, doc.width * 0.12]
+        ))
+        story.append(Spacer(1, 0.7 * cm))
+
         labels = trans_grouped.apply(
             lambda row: f"{int(row['CODIGO BENEFICIO_origem'])}→{int(row['CODIGO BENEFICIO_destino'])}",
             axis=1
         )
         fig, ax = plt.subplots(figsize=(9.2, 6.0))
-        ax.barh(labels.tolist(), trans_grouped['count'].values, color='#059669')
+        ax.barh(labels.tolist(), trans_grouped['count'].values, color='#10B981')
         ax.set_title('Top 15 Transições Mais Frequentes')
         ax.set_xlabel('Quantidade')
+        ax.grid(axis='x', linestyle='-', linewidth=0.6)
+        _despine(ax)
         add_mpl_fig(fig, max_height_cm=12.5)
 
         top_codes = pd.concat([
@@ -690,16 +856,32 @@ def gerar_pdf_relatorio_visual(titulo, subtitulo, kpis, df_res, df_codigos):
         story.append(PageBreak())
         story.append(Paragraph("Erros", section_style))
 
+        # Tabela tipos de erro
+        if not tipo_erro_counts.empty:
+            tab_erro_tipo = [["Tipo de Erro", "Qtd"]]
+            for tipo, qtd in tipo_erro_counts.sort_values(ascending=False).items():
+                tab_erro_tipo.append([str(tipo)[:70], _fmt_int(qtd)])
+            story.append(_tabela_estilizada(tab_erro_tipo, col_widths=[doc.width * 0.82, doc.width * 0.18]))
+            story.append(Spacer(1, 0.7 * cm))
+
         if not tipo_erro_counts.empty:
             fig, ax = plt.subplots(figsize=(9.0, 5.2))
-            ax.barh(tipo_erro_counts.index.fillna('Desconhecido').astype(str), tipo_erro_counts.values, color='#DC2626')
+            ax.barh(tipo_erro_counts.index.fillna('Desconhecido').astype(str), tipo_erro_counts.values, color='#EF4444')
             ax.set_title('Top 10 Tipos de Erro')
             ax.set_xlabel('Quantidade')
+            ax.grid(axis='x', linestyle='-', linewidth=0.6)
+            _despine(ax)
             add_mpl_fig(fig)
 
         if 'PLANO' in erros_df.columns:
             erros_plano = erros_df.groupby('PLANO').size()
             if not erros_plano.empty:
+                tab_erros_plano = [["Plano", "Qtd"]]
+                for plano, qtd in erros_plano.sort_values(ascending=False).head(12).items():
+                    tab_erros_plano.append([str(plano), _fmt_int(qtd)])
+                story.append(_tabela_estilizada(tab_erros_plano, col_widths=[doc.width * 0.78, doc.width * 0.22]))
+                story.append(Spacer(1, 0.7 * cm))
+
                 fig, ax = plt.subplots(figsize=(7.2, 4.4))
                 ax.pie(erros_plano.values, labels=[str(p) for p in erros_plano.index], autopct='%1.1f%%', startangle=90)
                 ax.set_title('Erros por Plano')
@@ -709,11 +891,26 @@ def gerar_pdf_relatorio_visual(titulo, subtitulo, kpis, df_res, df_codigos):
         cod_erro = cod_erro.merge(df_codigos[['CODIGO', 'DESCRICAO']], left_on='CODIGO BENEFICIO', right_on='CODIGO', how='left')
         cod_erro = cod_erro.sort_values('erros', ascending=False).head(10).sort_values('erros', ascending=True)
         if not cod_erro.empty:
+            tab_cod_erro = [["Código", "Descrição", "Qtd"]]
+            for _, r in cod_erro.sort_values('erros', ascending=False).iterrows():
+                tab_cod_erro.append([
+                    str(int(r['CODIGO BENEFICIO'])) if pd.notna(r.get('CODIGO BENEFICIO')) else "-",
+                    str(r.get('DESCRICAO') if pd.notna(r.get('DESCRICAO')) else "-")[:70],
+                    _fmt_int(r.get('erros', 0)),
+                ])
+            story.append(_tabela_estilizada(
+                tab_cod_erro,
+                col_widths=[doc.width * 0.15, doc.width * 0.67, doc.width * 0.18]
+            ))
+            story.append(Spacer(1, 0.7 * cm))
+
             fig, ax = plt.subplots(figsize=(9.0, 5.2))
             labels = cod_erro['DESCRICAO'].fillna(cod_erro['CODIGO BENEFICIO'].astype(str)).astype(str)
             ax.barh(labels, cod_erro['erros'].values, color='#991B1B')
             ax.set_title('Top 10 Códigos com Mais Erros')
             ax.set_xlabel('Quantidade')
+            ax.grid(axis='x', linestyle='-', linewidth=0.6)
+            _despine(ax)
             add_mpl_fig(fig)
 
     doc.build(story, onFirstPage=desenhar_cabecalho_rodape, onLaterPages=desenhar_cabecalho_rodape)

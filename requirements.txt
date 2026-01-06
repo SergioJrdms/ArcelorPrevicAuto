@@ -8,3 +8,4 @@ reportlab
 kaleido
 matplotlib
 Pillow
+plotly_get_chrome

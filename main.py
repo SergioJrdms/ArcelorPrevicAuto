@@ -398,6 +398,17 @@ def gerar_pdf_relatorio(titulo, subtitulo, kpis, figuras):
         try:
             img_bytes = pio.to_image(fig, format='png', width=1200, height=700, scale=2)
         except Exception as e:
+            e_str = str(e)
+            if 'Kaleido requires Google Chrome' in e_str or 'plotly_get_chrome' in e_str:
+                raise RuntimeError(
+                    "Falha ao renderizar gráfico para imagem (Kaleido precisa de um navegador Chromium).\n\n"
+                    "Para resolver, escolha uma das opções:\n"
+                    "1) Instale o Google Chrome no Windows (recomendado).\n"
+                    "2) No terminal do Python, execute: plotly_get_chrome\n"
+                    "3) Alternativa (evita depender do Chrome do sistema): instale uma versão antiga do Kaleido (ex.: kaleido==0.2.1).\n\n"
+                    f"Detalhe do erro: {e_str}"
+                )
+
             raise RuntimeError(f"Falha ao renderizar gráfico para imagem (verifique kaleido): {e}")
 
         img = ImageReader(io.BytesIO(img_bytes))

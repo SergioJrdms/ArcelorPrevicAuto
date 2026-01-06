@@ -431,6 +431,296 @@ def gerar_pdf_relatorio_simples(titulo, subtitulo, kpis, df_res):
     return buffer.getvalue()
 
 
+def gerar_pdf_relatorio_visual(titulo, subtitulo, kpis, df_res, df_codigos):
+    import matplotlib.pyplot as plt
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import cm
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_LEFT
+    except Exception as e:
+        raise RuntimeError(f"Dependência ausente para PDF: {e}")
+
+    if df_res is None or df_res.empty:
+        raise RuntimeError("Não há dados para gerar o PDF")
+
+    width, height = A4
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=2 * cm,
+        rightMargin=2 * cm,
+        topMargin=2.3 * cm,
+        bottomMargin=1.8 * cm,
+        title=str(titulo),
+        author="ArcelorMittal",
+    )
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        name="TituloRelatorio",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=18,
+        leading=20,
+        textColor=colors.HexColor("#0B1F3A"),
+        spaceAfter=4,
+        alignment=TA_LEFT,
+    )
+    subtitle_style = ParagraphStyle(
+        name="SubtituloRelatorio",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=10,
+        leading=13,
+        textColor=colors.HexColor("#4B5563"),
+        spaceAfter=12,
+    )
+    section_style = ParagraphStyle(
+        name="SecaoRelatorio",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=12,
+        leading=14,
+        textColor=colors.HexColor("#0B1F3A"),
+        spaceBefore=10,
+        spaceAfter=6,
+    )
+    small_style = ParagraphStyle(
+        name="TextoPequeno",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=9,
+        leading=12,
+        textColor=colors.HexColor("#111827"),
+    )
+    kpi_style = ParagraphStyle(
+        name="Kpi",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=9,
+        leading=12,
+        textColor=colors.HexColor("#111827"),
+        spaceBefore=0,
+        spaceAfter=0,
+    )
+
+    def desenhar_cabecalho_rodape(canvas, _doc):
+        canvas.saveState()
+        canvas.setFillColor(colors.HexColor("#0B1F3A"))
+        canvas.rect(0, height - 1.1 * cm, width, 1.1 * cm, fill=1, stroke=0)
+        canvas.setFillColor(colors.white)
+        canvas.setFont("Helvetica-Bold", 10)
+        canvas.drawString(2 * cm, height - 0.75 * cm, "ArcelorMittal | Relatório Estatístico")
+        canvas.setFillColor(colors.HexColor("#6B7280"))
+        canvas.setFont("Helvetica", 8)
+        canvas.drawRightString(width - 2 * cm, 1.1 * cm, f"Página {_doc.page}")
+        canvas.restoreState()
+
+    def add_mpl_fig(fig, caption=None, max_height_cm=11.0):
+        img_bytes = _mpl_fig_to_png_bytes(fig)
+        bio = io.BytesIO(img_bytes)
+        img = Image(bio)
+        target_w = doc.width
+        target_h = min(max_height_cm * cm, target_w * 0.62)
+        img.drawWidth = target_w
+        img.drawHeight = target_h
+        story.append(img)
+        if caption:
+            story.append(Spacer(1, 0.2 * cm))
+            story.append(Paragraph(str(caption), subtitle_style))
+        story.append(Spacer(1, 0.6 * cm))
+
+    story = []
+    story.append(Paragraph(str(titulo), title_style))
+    story.append(Paragraph(str(subtitulo), subtitle_style))
+
+    if kpis:
+        story.append(Paragraph("Resumo", section_style))
+        itens = list(kpis.items())
+        ncols = 3
+        linhas = []
+        for i in range(0, len(itens), ncols):
+            linha = []
+            for j in range(ncols):
+                if i + j < len(itens):
+                    k, v = itens[i + j]
+                    linha.append(Paragraph(f"<b>{k}</b><br/>{v}", kpi_style))
+                else:
+                    linha.append(Paragraph(" ", kpi_style))
+            linhas.append(linha)
+
+        t = Table(linhas, colWidths=[doc.width / ncols] * ncols)
+        t.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F3F4F6")),
+                    ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#D1D5DB")),
+                    ("INNERGRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#E5E7EB")),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                    ("TOPPADDING", (0, 0), (-1, -1), 8),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ]
+            )
+        )
+        story.append(t)
+        story.append(Spacer(1, 0.8 * cm))
+
+    total_registros = int(len(df_res))
+    total_pessoas = int(df_res['CODIGO ORGANIZACAO NOME'].nunique()) if 'CODIGO ORGANIZACAO NOME' in df_res.columns else 0
+    grav_counts = df_res['GRAVIDADE'].value_counts() if 'GRAVIDADE' in df_res.columns else pd.Series(dtype=int)
+    story.append(Paragraph("Totais", section_style))
+    story.append(
+        Paragraph(
+            f"Registros: <b>{total_registros}</b><br/>"
+            f"Participantes: <b>{total_pessoas}</b><br/>"
+            f"OK: <b>{int(grav_counts.get('OK', 0))}</b> | "
+            f"INFO: <b>{int(grav_counts.get('INFO', 0))}</b> | "
+            f"ERRO: <b>{int(grav_counts.get('ERRO', 0))}</b>",
+            small_style,
+        )
+    )
+    story.append(Spacer(1, 0.8 * cm))
+
+    story.append(Paragraph("Visão Geral", section_style))
+    try:
+        plt.style.use('ggplot')
+    except Exception:
+        pass
+
+    grav = df_res.groupby('GRAVIDADE').size().reindex(['OK', 'INFO', 'ERRO']).fillna(0).astype(int)
+    fig, ax = plt.subplots(figsize=(7.2, 4.2))
+    colors_grav = ['#16A34A', '#0891B2', '#DC2626']
+    ax.pie(grav.values, labels=grav.index.tolist(), autopct='%1.1f%%', startangle=90, colors=colors_grav)
+    ax.set_title('Distribuição de Gravidade')
+    add_mpl_fig(fig)
+
+    if 'PLANO' in df_res.columns:
+        plano_grav = df_res.groupby(['PLANO', 'GRAVIDADE']).size().unstack(fill_value=0)
+        plano_grav = plano_grav.reindex(columns=['OK', 'INFO', 'ERRO'], fill_value=0)
+        fig, ax = plt.subplots(figsize=(8.5, 4.6))
+        x = np.arange(len(plano_grav.index))
+        w = 0.25
+        ax.bar(x - w, plano_grav['OK'].values, width=w, label='OK', color='#16A34A')
+        ax.bar(x, plano_grav['INFO'].values, width=w, label='INFO', color='#0891B2')
+        ax.bar(x + w, plano_grav['ERRO'].values, width=w, label='ERRO', color='#DC2626')
+        ax.set_xticks(x)
+        ax.set_xticklabels([str(p) for p in plano_grav.index], rotation=0)
+        ax.set_title('Movimentações por Plano e Status')
+        ax.set_xlabel('Plano')
+        ax.set_ylabel('Quantidade')
+        ax.legend()
+        add_mpl_fig(fig)
+
+    story.append(PageBreak())
+    story.append(Paragraph("Códigos e Benefícios", section_style))
+
+    mov_por_codigo = df_res.groupby('CODIGO BENEFICIO').size().reset_index(name='count')
+    mov_por_codigo = mov_por_codigo.merge(
+        df_codigos[['CODIGO', 'DESCRICAO', 'TIPO']],
+        left_on='CODIGO BENEFICIO',
+        right_on='CODIGO',
+        how='left'
+    )
+    top10 = mov_por_codigo.nlargest(10, 'count').sort_values('count', ascending=True)
+    fig, ax = plt.subplots(figsize=(9.0, 5.0))
+    ax.barh(top10['DESCRICAO'].fillna(top10['CODIGO BENEFICIO'].astype(str)).astype(str), top10['count'].values, color='#1D4ED8')
+    ax.set_title('Top 10 Códigos Mais Utilizados')
+    ax.set_xlabel('Quantidade')
+    add_mpl_fig(fig)
+
+    tipo_dist = mov_por_codigo.groupby('TIPO')['count'].sum().sort_values(ascending=True)
+    if not tipo_dist.empty:
+        fig, ax = plt.subplots(figsize=(7.8, 4.4))
+        ax.barh(tipo_dist.index.astype(str), tipo_dist.values, color='#F97316')
+        ax.set_title('Distribuição por Tipo de Código')
+        ax.set_xlabel('Quantidade')
+        add_mpl_fig(fig)
+
+    transicoes = df_res[df_res['MOVIMENTO'] == 'SAIDA'].merge(
+        df_res[df_res['MOVIMENTO'] == 'ENTRADA'],
+        on=['CODIGO ORGANIZACAO NOME', 'ANO MES'],
+        suffixes=('_origem', '_destino')
+    )
+    if not transicoes.empty:
+        story.append(PageBreak())
+        story.append(Paragraph("Transições", section_style))
+        trans_grouped = transicoes.groupby(['CODIGO BENEFICIO_origem', 'CODIGO BENEFICIO_destino']).size().reset_index(name='count')
+        trans_grouped = trans_grouped.nlargest(15, 'count').sort_values('count', ascending=True)
+        labels = trans_grouped.apply(
+            lambda row: f"{int(row['CODIGO BENEFICIO_origem'])}→{int(row['CODIGO BENEFICIO_destino'])}",
+            axis=1
+        )
+        fig, ax = plt.subplots(figsize=(9.2, 6.0))
+        ax.barh(labels.tolist(), trans_grouped['count'].values, color='#059669')
+        ax.set_title('Top 15 Transições Mais Frequentes')
+        ax.set_xlabel('Quantidade')
+        add_mpl_fig(fig, max_height_cm=12.5)
+
+        top_codes = pd.concat([
+            transicoes['CODIGO BENEFICIO_origem'],
+            transicoes['CODIGO BENEFICIO_destino']
+        ]).value_counts().head(20).index.tolist()
+        matriz = transicoes.groupby(['CODIGO BENEFICIO_origem', 'CODIGO BENEFICIO_destino']).size().reset_index(name='count')
+        matriz = matriz[matriz['CODIGO BENEFICIO_origem'].isin(top_codes) & matriz['CODIGO BENEFICIO_destino'].isin(top_codes)]
+        if not matriz.empty:
+            pivot = matriz.pivot(index='CODIGO BENEFICIO_origem', columns='CODIGO BENEFICIO_destino', values='count').fillna(0)
+            pivot = pivot.reindex(index=sorted(top_codes), columns=sorted(top_codes), fill_value=0)
+            fig, ax = plt.subplots(figsize=(10.0, 7.0))
+            im = ax.imshow(pivot.values, aspect='auto', cmap='RdYlGn')
+            ax.set_title('Heatmap de Transições (Top 20 códigos)')
+            ax.set_xlabel('Destino')
+            ax.set_ylabel('Origem')
+            ax.set_xticks(np.arange(len(pivot.columns)))
+            ax.set_yticks(np.arange(len(pivot.index)))
+            ax.set_xticklabels([str(int(c)) for c in pivot.columns], rotation=90)
+            ax.set_yticklabels([str(int(i)) for i in pivot.index])
+            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            add_mpl_fig(fig, max_height_cm=13.5)
+
+    if 'GRAVIDADE' in df_res.columns and (df_res['GRAVIDADE'] == 'ERRO').any():
+        erros_df = df_res[df_res['GRAVIDADE'] == 'ERRO'].copy()
+        erros_df['TIPO_ERRO'] = erros_df['ANALISE'].astype(str).str.extract(r'ERRO: ([^.]+)')[0]
+        tipo_erro_counts = erros_df.groupby('TIPO_ERRO').size().sort_values(ascending=True).tail(10)
+        story.append(PageBreak())
+        story.append(Paragraph("Erros", section_style))
+
+        if not tipo_erro_counts.empty:
+            fig, ax = plt.subplots(figsize=(9.0, 5.2))
+            ax.barh(tipo_erro_counts.index.fillna('Desconhecido').astype(str), tipo_erro_counts.values, color='#DC2626')
+            ax.set_title('Top 10 Tipos de Erro')
+            ax.set_xlabel('Quantidade')
+            add_mpl_fig(fig)
+
+        if 'PLANO' in erros_df.columns:
+            erros_plano = erros_df.groupby('PLANO').size()
+            if not erros_plano.empty:
+                fig, ax = plt.subplots(figsize=(7.2, 4.4))
+                ax.pie(erros_plano.values, labels=[str(p) for p in erros_plano.index], autopct='%1.1f%%', startangle=90)
+                ax.set_title('Erros por Plano')
+                add_mpl_fig(fig)
+
+        cod_erro = erros_df.groupby('CODIGO BENEFICIO').size().reset_index(name='erros')
+        cod_erro = cod_erro.merge(df_codigos[['CODIGO', 'DESCRICAO']], left_on='CODIGO BENEFICIO', right_on='CODIGO', how='left')
+        cod_erro = cod_erro.sort_values('erros', ascending=False).head(10).sort_values('erros', ascending=True)
+        if not cod_erro.empty:
+            fig, ax = plt.subplots(figsize=(9.0, 5.2))
+            labels = cod_erro['DESCRICAO'].fillna(cod_erro['CODIGO BENEFICIO'].astype(str)).astype(str)
+            ax.barh(labels, cod_erro['erros'].values, color='#991B1B')
+            ax.set_title('Top 10 Códigos com Mais Erros')
+            ax.set_xlabel('Quantidade')
+            add_mpl_fig(fig)
+
+    doc.build(story, onFirstPage=desenhar_cabecalho_rodape, onLaterPages=desenhar_cabecalho_rodape)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
 def gerar_pdf_relatorio_sem_kaleido(titulo, subtitulo, kpis, df_res, df_codigos):
     import matplotlib.pyplot as plt
     try:
@@ -1424,6 +1714,58 @@ def main():
                     st.info(
                         f"→ Acompanhar {stats.get('info', 0)} processos pendentes")
                 st.info("→ Monitorar tendências mensais")
+
+            st.markdown("### 📄 Exportação")
+            col_pdf_1, col_pdf_2 = st.columns([1, 2])
+            with col_pdf_1:
+                gerar_pdf = st.button(
+                    "📄 Gerar PDF",
+                    type="secondary",
+                    use_container_width=True,
+                    key=f"gerar_pdf_{visao_stats}_{ano_sel}_{mes_alvo}"
+                )
+
+            if gerar_pdf:
+                try:
+                    titulo = "Relatório de Estatísticas - ArcelorMittal"
+                    if visao_stats == "Estatística Mensal":
+                        subtitulo = f"Período: {mes_alvo}"
+                    else:
+                        if ano_sel == "Todos":
+                            subtitulo = f"Período: {meses_disponiveis_stats[0]} a {meses_disponiveis_stats[-1]}"
+                        else:
+                            subtitulo = f"Ano: {ano_sel}"
+
+                    kpis_pdf = {
+                        'Participantes': f"{total_participantes:,}",
+                        'Movimentações': f"{total_movs:,}",
+                        'Taxa Conformidade': f"{taxa_conformidade:.1f}%",
+                        'Taxa de Erro': f"{taxa_erro:.1f}%",
+                        'Média Movs/Pessoa': f"{media_movs_participante:.1f}"
+                    }
+
+                    st.session_state['pdf_bytes'] = gerar_pdf_relatorio_visual(
+                        titulo,
+                        subtitulo,
+                        kpis_pdf,
+                        df_res,
+                        df_codigos
+                    )
+                    st.success("✅ PDF gerado")
+                except Exception as e:
+                    st.error(f"❌ Não foi possível gerar o PDF: {e}")
+
+            with col_pdf_2:
+                if 'pdf_bytes' in st.session_state and st.session_state['pdf_bytes']:
+                    sufixo = mes_alvo if visao_stats == 'Estatística Mensal' else (ano_sel if ano_sel != 'Todos' else 'geral')
+                    nome_pdf = f"relatorio_estatisticas_{sufixo}.pdf"
+                    st.download_button(
+                        label="📥 Download PDF",
+                        data=st.session_state['pdf_bytes'],
+                        file_name=nome_pdf,
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
 
         else:
             st.info("ℹ️ Carregue um arquivo e/ou execute uma análise primeiro")

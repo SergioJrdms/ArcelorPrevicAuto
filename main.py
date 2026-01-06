@@ -1425,57 +1425,6 @@ def main():
                         f"→ Acompanhar {stats.get('info', 0)} processos pendentes")
                 st.info("→ Monitorar tendências mensais")
 
-            st.markdown("### 📄 Exportação")
-            col_pdf_1, col_pdf_2 = st.columns([1, 2])
-            with col_pdf_1:
-                gerar_pdf = st.button(
-                    "📄 Gerar PDF",
-                    type="secondary",
-                    use_container_width=True,
-                    key=f"gerar_pdf_{visao_stats}_{ano_sel}_{mes_alvo}"
-                )
-
-            if gerar_pdf:
-                try:
-                    titulo = "Relatório de Estatísticas - ArcelorMittal"
-                    if visao_stats == "Estatística Mensal":
-                        subtitulo = f"Período: {mes_alvo}"
-                    else:
-                        if ano_sel == "Todos":
-                            subtitulo = f"Período: {meses_disponiveis_stats[0]} a {meses_disponiveis_stats[-1]}"
-                        else:
-                            subtitulo = f"Ano: {ano_sel}"
-
-                    kpis_pdf = {
-                        'Participantes': f"{total_participantes:,}",
-                        'Movimentações': f"{total_movs:,}",
-                        'Taxa Conformidade': f"{taxa_conformidade:.1f}%",
-                        'Taxa de Erro': f"{taxa_erro:.1f}%",
-                        'Média Movs/Pessoa': f"{media_movs_participante:.1f}"
-                    }
-
-                    st.session_state['pdf_bytes'] = gerar_pdf_relatorio_simples(
-                        titulo,
-                        subtitulo,
-                        kpis_pdf,
-                        df_res
-                    )
-                    st.success("✅ PDF gerado")
-                except Exception as e:
-                    st.error(f"❌ Não foi possível gerar o PDF: {e}")
-
-            with col_pdf_2:
-                if 'pdf_bytes' in st.session_state and st.session_state['pdf_bytes']:
-                    sufixo = mes_alvo if visao_stats == 'Estatística Mensal' else (ano_sel if ano_sel != 'Todos' else 'geral')
-                    nome_pdf = f"relatorio_estatisticas_{sufixo}.pdf"
-                    st.download_button(
-                        label="📥 Download PDF",
-                        data=st.session_state['pdf_bytes'],
-                        file_name=nome_pdf,
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
-
         else:
             st.info("ℹ️ Carregue um arquivo e/ou execute uma análise primeiro")
 

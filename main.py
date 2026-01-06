@@ -363,6 +363,197 @@ def analisar_movimentacoes_periodo(df_mov, df_codigos, regras_validas, constante
     return df_res, stats
 
 
+def _mpl_fig_to_png_bytes(fig):
+    import matplotlib.pyplot as plt
+    bio = io.BytesIO()
+    fig.savefig(bio, format='png', dpi=200, bbox_inches='tight')
+    plt.close(fig)
+    bio.seek(0)
+    return bio.getvalue()
+
+
+def gerar_pdf_relatorio_sem_kaleido(titulo, subtitulo, kpis, df_res, df_codigos):
+    import matplotlib.pyplot as plt
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.units import cm
+        from reportlab.lib.utils import ImageReader
+    except Exception as e:
+        raise RuntimeError(f"Dependência ausente para PDF: {e}")
+
+    if df_res is None or df_res.empty:
+        raise RuntimeError("Não há dados para gerar o PDF")
+
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+
+    y = height - 2 * cm
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(2 * cm, y, str(titulo))
+    y -= 0.8 * cm
+    c.setFont("Helvetica", 10)
+    c.drawString(2 * cm, y, str(subtitulo))
+    y -= 1.2 * cm
+
+    if kpis:
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(2 * cm, y, "Resumo")
+        y -= 0.6 * cm
+        c.setFont("Helvetica", 9)
+        for k, v in kpis.items():
+            c.drawString(2 * cm, y, f"{k}: {v}")
+            y -= 0.45 * cm
+        y -= 0.4 * cm
+
+    imagens = []
+
+    # 1) Distribuição por gravidade
+    grav = df_res.groupby('GRAVIDADE').size().reindex(['OK', 'INFO', 'ERRO']).fillna(0).astype(int)
+    fig, ax = plt.subplots(figsize=(7.2, 4.2))
+    colors = ['#28a745', '#17a2b8', '#dc3545']
+    ax.pie(grav.values, labels=grav.index.tolist(), autopct='%1.1f%%', startangle=90, colors=colors)
+    ax.set_title('Distribuição de Gravidade')
+    imagens.append(_mpl_fig_to_png_bytes(fig))
+
+    # 2) Análise por plano (se existir)
+    if 'PLANO' in df_res.columns:
+        plano_grav = df_res.groupby(['PLANO', 'GRAVIDADE']).size().unstack(fill_value=0)
+        plano_grav = plano_grav.reindex(columns=['OK', 'INFO', 'ERRO'], fill_value=0)
+        fig, ax = plt.subplots(figsize=(8.5, 4.5))
+        x = np.arange(len(plano_grav.index))
+        w = 0.25
+        ax.bar(x - w, plano_grav['OK'].values, width=w, label='OK', color='#28a745')
+        ax.bar(x, plano_grav['INFO'].values, width=w, label='INFO', color='#17a2b8')
+        ax.bar(x + w, plano_grav['ERRO'].values, width=w, label='ERRO', color='#dc3545')
+        ax.set_xticks(x)
+        ax.set_xticklabels([str(p) for p in plano_grav.index])
+        ax.set_title('Movimentações por Plano e Status')
+        ax.set_xlabel('Plano')
+        ax.set_ylabel('Quantidade')
+        ax.legend()
+        imagens.append(_mpl_fig_to_png_bytes(fig))
+
+    # 3) Top 10 códigos mais utilizados
+    mov_por_codigo = df_res.groupby('CODIGO BENEFICIO').size().reset_index(name='count')
+    mov_por_codigo = mov_por_codigo.merge(
+        df_codigos[['CODIGO', 'DESCRICAO', 'TIPO']],
+        left_on='CODIGO BENEFICIO',
+        right_on='CODIGO',
+        how='left'
+    )
+    top10 = mov_por_codigo.nlargest(10, 'count').sort_values('count', ascending=True)
+    fig, ax = plt.subplots(figsize=(9.0, 5.0))
+    ax.barh(top10['DESCRICAO'].fillna(top10['CODIGO BENEFICIO'].astype(str)).astype(str), top10['count'].values, color='#1f77b4')
+    ax.set_title('Top 10 Códigos Mais Utilizados')
+    ax.set_xlabel('Quantidade')
+    imagens.append(_mpl_fig_to_png_bytes(fig))
+
+    # 4) Distribuição por tipo
+    tipo_dist = mov_por_codigo.groupby('TIPO')['count'].sum().sort_values(ascending=True)
+    if not tipo_dist.empty:
+        fig, ax = plt.subplots(figsize=(7.5, 4.2))
+        ax.barh(tipo_dist.index.astype(str), tipo_dist.values, color='#ff7f0e')
+        ax.set_title('Distribuição por Tipo de Código')
+        ax.set_xlabel('Quantidade')
+        imagens.append(_mpl_fig_to_png_bytes(fig))
+
+    # 5) Transições (top 15)
+    transicoes = df_res[df_res['MOVIMENTO'] == 'SAIDA'].merge(
+        df_res[df_res['MOVIMENTO'] == 'ENTRADA'],
+        on=['CODIGO ORGANIZACAO NOME', 'ANO MES'],
+        suffixes=('_origem', '_destino')
+    )
+    if not transicoes.empty:
+        trans_grouped = transicoes.groupby(['CODIGO BENEFICIO_origem', 'CODIGO BENEFICIO_destino']).size().reset_index(name='count')
+        trans_grouped = trans_grouped.nlargest(15, 'count').sort_values('count', ascending=True)
+
+        codigo_to_desc = df_codigos.set_index('CODIGO')['DESCRICAO'].to_dict()
+        labels = trans_grouped.apply(
+            lambda row: f"{int(row['CODIGO BENEFICIO_origem'])}→{int(row['CODIGO BENEFICIO_destino'])}",
+            axis=1
+        )
+
+        fig, ax = plt.subplots(figsize=(9.5, 6.0))
+        ax.barh(labels.tolist(), trans_grouped['count'].values, color='#2ca02c')
+        ax.set_title('Top 15 Transições Mais Frequentes')
+        ax.set_xlabel('Quantidade')
+        imagens.append(_mpl_fig_to_png_bytes(fig))
+
+        # 6) Heatmap de transições (top 20 códigos para legibilidade)
+        top_codes = pd.concat([
+            transicoes['CODIGO BENEFICIO_origem'],
+            transicoes['CODIGO BENEFICIO_destino']
+        ]).value_counts().head(20).index.tolist()
+
+        matriz = transicoes.groupby(['CODIGO BENEFICIO_origem', 'CODIGO BENEFICIO_destino']).size().reset_index(name='count')
+        matriz = matriz[matriz['CODIGO BENEFICIO_origem'].isin(top_codes) & matriz['CODIGO BENEFICIO_destino'].isin(top_codes)]
+        if not matriz.empty:
+            pivot = matriz.pivot(index='CODIGO BENEFICIO_origem', columns='CODIGO BENEFICIO_destino', values='count').fillna(0)
+            pivot = pivot.reindex(index=sorted(top_codes), columns=sorted(top_codes), fill_value=0)
+
+            fig, ax = plt.subplots(figsize=(10.0, 7.0))
+            im = ax.imshow(pivot.values, aspect='auto', cmap='RdYlGn')
+            ax.set_title('Heatmap de Transições (Top 20 códigos)')
+            ax.set_xlabel('Destino')
+            ax.set_ylabel('Origem')
+            ax.set_xticks(np.arange(len(pivot.columns)))
+            ax.set_yticks(np.arange(len(pivot.index)))
+            ax.set_xticklabels([str(int(c)) for c in pivot.columns], rotation=90)
+            ax.set_yticklabels([str(int(i)) for i in pivot.index])
+            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            imagens.append(_mpl_fig_to_png_bytes(fig))
+
+    # 7) Erros (se houver)
+    if 'GRAVIDADE' in df_res.columns and (df_res['GRAVIDADE'] == 'ERRO').any():
+        erros_df = df_res[df_res['GRAVIDADE'] == 'ERRO'].copy()
+        erros_df['TIPO_ERRO'] = erros_df['ANALISE'].astype(str).str.extract(r'ERRO: ([^.]+)')[0]
+        tipo_erro_counts = erros_df.groupby('TIPO_ERRO').size().sort_values(ascending=True).tail(10)
+        if not tipo_erro_counts.empty:
+            fig, ax = plt.subplots(figsize=(9.0, 5.0))
+            ax.barh(tipo_erro_counts.index.fillna('Desconhecido').astype(str), tipo_erro_counts.values, color='#dc3545')
+            ax.set_title('Top 10 Tipos de Erro')
+            ax.set_xlabel('Quantidade')
+            imagens.append(_mpl_fig_to_png_bytes(fig))
+
+        if 'PLANO' in erros_df.columns:
+            erros_plano = erros_df.groupby('PLANO').size()
+            if not erros_plano.empty:
+                fig, ax = plt.subplots(figsize=(7.0, 4.2))
+                ax.pie(erros_plano.values, labels=[str(p) for p in erros_plano.index], autopct='%1.1f%%', startangle=90)
+                ax.set_title('Erros por Plano')
+                imagens.append(_mpl_fig_to_png_bytes(fig))
+
+        cod_erro = erros_df.groupby('CODIGO BENEFICIO').size().reset_index(name='erros')
+        cod_erro = cod_erro.merge(df_codigos[['CODIGO', 'DESCRICAO']], left_on='CODIGO BENEFICIO', right_on='CODIGO', how='left')
+        cod_erro = cod_erro.sort_values('erros', ascending=False).head(10).sort_values('erros', ascending=True)
+        if not cod_erro.empty:
+            fig, ax = plt.subplots(figsize=(9.0, 5.0))
+            labels = cod_erro['DESCRICAO'].fillna(cod_erro['CODIGO BENEFICIO'].astype(str)).astype(str)
+            ax.barh(labels, cod_erro['erros'].values, color='crimson')
+            ax.set_title('Top 10 Códigos com Mais Erros')
+            ax.set_xlabel('Quantidade')
+            imagens.append(_mpl_fig_to_png_bytes(fig))
+
+    # Renderiza imagens no PDF
+    for img_bytes in imagens:
+        img = ImageReader(io.BytesIO(img_bytes))
+        img_w = width - 4 * cm
+        img_h = img_w * (700 / 1200)
+
+        if y - img_h < 2 * cm:
+            c.showPage()
+            y = height - 2 * cm
+
+        c.drawImage(img, 2 * cm, y - img_h, width=img_w, height=img_h, preserveAspectRatio=True, anchor='c')
+        y -= img_h + 1 * cm
+
+    c.save()
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
 def gerar_pdf_relatorio(titulo, subtitulo, kpis, figuras):
     try:
         from reportlab.lib.pagesizes import A4
@@ -1264,11 +1455,12 @@ def main():
                         'Média Movs/Pessoa': f"{media_movs_participante:.1f}"
                     }
 
-                    st.session_state['pdf_bytes'] = gerar_pdf_relatorio(
+                    st.session_state['pdf_bytes'] = gerar_pdf_relatorio_sem_kaleido(
                         titulo,
                         subtitulo,
                         kpis_pdf,
-                        figuras_pdf
+                        df_res,
+                        df_codigos
                     )
                     st.success("✅ PDF gerado")
                 except Exception as e:

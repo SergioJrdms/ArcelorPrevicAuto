@@ -372,6 +372,65 @@ def _mpl_fig_to_png_bytes(fig):
     return bio.getvalue()
 
 
+def gerar_pdf_relatorio_simples(titulo, subtitulo, kpis, df_res):
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.units import cm
+    except Exception as e:
+        raise RuntimeError(f"Dependência ausente para PDF: {e}")
+
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+
+    y = height - 2 * cm
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(2 * cm, y, str(titulo))
+    y -= 0.8 * cm
+    c.setFont("Helvetica", 10)
+    c.drawString(2 * cm, y, str(subtitulo))
+    y -= 1.2 * cm
+
+    if kpis:
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(2 * cm, y, "Resumo")
+        y -= 0.6 * cm
+        c.setFont("Helvetica", 9)
+        for k, v in kpis.items():
+            c.drawString(2 * cm, y, f"{k}: {v}")
+            y -= 0.45 * cm
+        y -= 0.4 * cm
+
+    if df_res is not None and not df_res.empty:
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(2 * cm, y, "Totais")
+        y -= 0.6 * cm
+        c.setFont("Helvetica", 9)
+        try:
+            total_registros = int(len(df_res))
+            total_pessoas = int(df_res['CODIGO ORGANIZACAO NOME'].nunique()) if 'CODIGO ORGANIZACAO NOME' in df_res.columns else 0
+            c.drawString(2 * cm, y, f"Registros: {total_registros}")
+            y -= 0.45 * cm
+            c.drawString(2 * cm, y, f"Participantes: {total_pessoas}")
+            y -= 0.45 * cm
+
+            if 'GRAVIDADE' in df_res.columns:
+                counts = df_res['GRAVIDADE'].value_counts()
+                c.drawString(2 * cm, y, f"OK: {int(counts.get('OK', 0))}")
+                y -= 0.45 * cm
+                c.drawString(2 * cm, y, f"INFO: {int(counts.get('INFO', 0))}")
+                y -= 0.45 * cm
+                c.drawString(2 * cm, y, f"ERRO: {int(counts.get('ERRO', 0))}")
+                y -= 0.45 * cm
+        except Exception:
+            pass
+
+    c.save()
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
 def gerar_pdf_relatorio_sem_kaleido(titulo, subtitulo, kpis, df_res, df_codigos):
     import matplotlib.pyplot as plt
     try:
@@ -555,67 +614,7 @@ def gerar_pdf_relatorio_sem_kaleido(titulo, subtitulo, kpis, df_res, df_codigos)
 
 
 def gerar_pdf_relatorio(titulo, subtitulo, kpis, figuras):
-    try:
-        from reportlab.lib.pagesizes import A4
-        from reportlab.pdfgen import canvas
-        from reportlab.lib.units import cm
-        from reportlab.lib.utils import ImageReader
-    except Exception as e:
-        raise RuntimeError(f"Dependência ausente para PDF: {e}")
-
-    buffer = io.BytesIO()
-    c = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
-
-    y = height - 2 * cm
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(2 * cm, y, str(titulo))
-    y -= 0.8 * cm
-    c.setFont("Helvetica", 10)
-    c.drawString(2 * cm, y, str(subtitulo))
-    y -= 1.2 * cm
-
-    if kpis:
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(2 * cm, y, "Resumo")
-        y -= 0.6 * cm
-        c.setFont("Helvetica", 9)
-        for k, v in kpis.items():
-            c.drawString(2 * cm, y, f"{k}: {v}")
-            y -= 0.45 * cm
-        y -= 0.4 * cm
-
-    for fig in figuras or []:
-        try:
-            img_bytes = pio.to_image(fig, format='png', width=1200, height=700, scale=2)
-        except Exception as e:
-            e_str = str(e)
-            if 'Kaleido requires Google Chrome' in e_str or 'plotly_get_chrome' in e_str:
-                raise RuntimeError(
-                    "Falha ao renderizar gráfico para imagem (Kaleido precisa de um navegador Chromium).\n\n"
-                    "Para resolver, escolha uma das opções:\n"
-                    "1) Instale o Google Chrome no Windows (recomendado).\n"
-                    "2) No terminal do Python, execute: plotly_get_chrome\n"
-                    "3) Alternativa (evita depender do Chrome do sistema): instale uma versão antiga do Kaleido (ex.: kaleido==0.2.1).\n\n"
-                    f"Detalhe do erro: {e_str}"
-                )
-
-            raise RuntimeError(f"Falha ao renderizar gráfico para imagem (verifique kaleido): {e}")
-
-        img = ImageReader(io.BytesIO(img_bytes))
-        img_w = width - 4 * cm
-        img_h = img_w * (700 / 1200)
-
-        if y - img_h < 2 * cm:
-            c.showPage()
-            y = height - 2 * cm
-
-        c.drawImage(img, 2 * cm, y - img_h, width=img_w, height=img_h, preserveAspectRatio=True, anchor='c')
-        y -= img_h + 1 * cm
-
-    c.save()
-    buffer.seek(0)
-    return buffer.getvalue()
+    raise RuntimeError("Exportação via Kaleido desativada. Use gerar_pdf_relatorio_simples().")
 
 # ============================================================================
 # INTERFACE PRINCIPAL
@@ -1455,12 +1454,11 @@ def main():
                         'Média Movs/Pessoa': f"{media_movs_participante:.1f}"
                     }
 
-                    st.session_state['pdf_bytes'] = gerar_pdf_relatorio_sem_kaleido(
+                    st.session_state['pdf_bytes'] = gerar_pdf_relatorio_simples(
                         titulo,
                         subtitulo,
                         kpis_pdf,
-                        df_res,
-                        df_codigos
+                        df_res
                     )
                     st.success("✅ PDF gerado")
                 except Exception as e:

@@ -94,7 +94,7 @@ def carregar_base_conhecimento():
     df_codigos = pd.DataFrame(codigos_data)
 
     # CÓDIGOS CONSOLIDADORES QUE DEVEM SER IGNORADOS NA ANÁLISE
-    CODIGOS_IGNORAR = {31000, 32000, 33000, 34000}
+    CODIGOS_IGNORAR = set()  # Não ignorar mais códigos consolidadores
 
     # CÓDIGOS QUE CAUSAM RUÍDO EM MÚLTIPLAS SAÍDAS (devem ser filtrados ao calcular saídas líquidas)
     CODIGOS_RUIDO_SAIDA = {31100, 31200, 31300, 11000, 14000}
@@ -211,6 +211,43 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
             df_mes.loc[group.index, 'GRAVIDADE'] = 'ERRO'
             stats['erros'] += 1
             continue
+            
+
+        # Validação 3: Códigos consolidadores devem ter movimentações correspondentes
+        if 'CODIGO BENEFICIO' in entradas.columns:
+            # Valida código 32000 (Consolidado Aposentados)
+            if 32000 in codigos_entrada_set or 32000 in codigos_saida_set:
+                # 32000 deve refletir movimentações em 11000, 11100, 11200
+                codigos_aposentados = {11000, 11100, 11200}
+                movs_aposentados = codigos_entrada_set.union(codigos_saida_set) & codigos_aposentados
+                
+                if not movs_aposentados:
+                    msg = "ERRO: Código 32000 lançado sem movimentação correspondente nas contas de aposentados (11000, 11100, 11200)"
+                    df_mes.loc[group.index, 'ANALISE'] = msg
+                    df_mes.loc[group.index, 'GRAVIDADE'] = 'ERRO'
+                    stats['erros'] += 1
+                    continue
+
+        # Validação 4: Saída de 33000 exige saída de 14000
+        saidas_33000 = saidas[saidas['CODIGO BENEFICIO'] == 33000]
+        if not saidas_33000.empty:
+            saidas_14000 = saidas[saidas['CODIGO BENEFICIO'] == 14000]
+            if saidas_14000.empty:
+                msg = "ERRO: Saída no código 33000 (Consolidado Pensionistas) sem saída correspondente na conta 14000 (Pensão por Morte)"
+                df_mes.loc[group.index, 'ANALISE'] = msg
+                df_mes.loc[group.index, 'GRAVIDADE'] = 'ERRO'
+                stats['erros'] += 1
+                continue
+            
+            # Valida código 33000 (Consolidado Pensionistas)
+            if 33000 in codigos_entrada_set or 33000 in codigos_saida_set:
+                # 33000 deve refletir movimentações em 14000
+                if 14000 not in codigos_entrada_set and 14000 not in codigos_saida_set:
+                    msg = "ERRO: Código 33000 lançado sem movimentação correspondente na conta de pensão (14000)"
+                    df_mes.loc[group.index, 'ANALISE'] = msg
+                    df_mes.loc[group.index, 'GRAVIDADE'] = 'ERRO'
+                    stats['erros'] += 1
+                    continue
 
         # Análise de transições
         saidas = group[group['MOVIMENTO'] == 'SAIDA']
@@ -253,6 +290,17 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
 
         msg = ''
         gravidade = 'OK'
+
+        # Tratamento especial para códigos consolidadores corretos
+        if len(saidas_liquidas) == 0 and len(entradas_liquidas) == 0:
+            # Se só tem códigos consolidadores e eles estão corretos
+            codigos_consolidadores = {31000, 32000, 33000}
+            tem_consolidador = bool(codigos_entrada_set & codigos_consolidadores)
+            
+            if tem_consolidador and not msg:  # Ainda não tem mensagem de erro
+                msg = f"OK: Lançamento consolidador correto"
+                gravidade = 'OK'
+                stats['ok'] += 1
 
         # ERRO: Múltiplas saídas líquidas (após filtrar códigos de ruído)
         if len(saidas_liquidas) > 1:
@@ -307,9 +355,15 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
             stats['ok'] += 1
 
         elif len(saidas_liquidas) > 0 and len(entradas_liquidas) == 0:
-            msg = f"INFO: Processo em andamento (aguardando conclusão)"
-            gravidade = 'INFO'
-            stats['info'] += 1
+            # Saída de autopatrocinado (22000) sem entrada é ERRO
+            if 22000 in saidas_liquidas:
+                msg = f"ERRO: Saída de autopatrocinado (22000) sem entrada em nova situação"
+                gravidade = 'ERRO'
+                stats['erros'] += 1
+            else:
+                msg = f"INFO: Processo em andamento (aguardando conclusão)"
+                gravidade = 'INFO'
+                stats['info'] += 1
 
         if msg:
             df_mes.loc[group.index, 'ANALISE'] = msg
@@ -1195,8 +1249,8 @@ def main():
                             int)
 
                         # Remove códigos ignorados
-                        df_para_analise = df_para_analise[~df_para_analise['CODIGO BENEFICIO'].isin(
-                            constantes['CODIGOS_IGNORAR'])].copy()
+                        # df_para_analise = df_para_analise[~df_para_analise['CODIGO BENEFICIO'].isin(
+                        #     constantes['CODIGOS_IGNORAR'])].copy()
 
                         # Remove duplicatas
                         df_para_analise = df_para_analise.sort_values('ANO MES').drop_duplicates(

@@ -205,6 +205,10 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
         entradas = group[group['MOVIMENTO'] == 'ENTRADA']
         codigos_entrada_set = set(entradas['CODIGO BENEFICIO'])
 
+        # Análise de transições
+        saidas = group[group['MOVIMENTO'] == 'SAIDA']
+        codigos_saida_set = set(saidas['CODIGO BENEFICIO'])
+
         if 14000 in codigos_entrada_set and 15000 in codigos_entrada_set:
             msg = "ERRO: PENSÃO e PECÚLIO no mesmo mês"
             df_mes.loc[group.index, 'ANALISE'] = msg
@@ -238,6 +242,7 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
                 df_mes.loc[group.index, 'GRAVIDADE'] = 'ERRO'
                 stats['erros'] += 1
                 continue
+
             
             # Valida código 33000 (Consolidado Pensionistas)
             if 33000 in codigos_entrada_set or 33000 in codigos_saida_set:
@@ -248,10 +253,6 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
                     df_mes.loc[group.index, 'GRAVIDADE'] = 'ERRO'
                     stats['erros'] += 1
                     continue
-
-        # Análise de transições
-        saidas = group[group['MOVIMENTO'] == 'SAIDA']
-        codigos_saida_set = set(saidas['CODIGO BENEFICIO'])
 
         codigos_entrada_independentes = codigos_entrada_set & constantes.get(
             'CODIGOS_ENTRADA_INDEPENDENTE', set())

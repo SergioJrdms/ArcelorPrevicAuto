@@ -97,7 +97,7 @@ def carregar_base_conhecimento():
     CODIGOS_IGNORAR = set()  # Não ignorar mais códigos consolidadores
 
     # CÓDIGOS QUE CAUSAM RUÍDO EM MÚLTIPLAS SAÍDAS (devem ser filtrados ao calcular saídas líquidas)
-    CODIGOS_RUIDO_SAIDA = {31100, 31200, 31300, 11000, 14000}
+    CODIGOS_RUIDO_SAIDA = {31100, 31200, 31300, 31000, 32000, 33000, 11000, 14000}
 
     CONTAS_ZERAGEM_ANUAL = {13000, 15000, 16000, 23000, 24100, 24200}
     CODIGOS_ADMISSAO = {31100, 31200}

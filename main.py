@@ -275,6 +275,11 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
         else:
             saidas_liquidas = saidas_liquidas_brutas
 
+        if len(entradas_liquidas) > 1:
+            entradas_liquidas_filtradas = entradas_liquidas - constantes['CODIGOS_RUIDO_SAIDA']
+        else:
+            entradas_liquidas_filtradas = entradas_liquidas
+
         # Classificação de passos
         for idx, row in group.iterrows():
             cod = row['CODIGO BENEFICIO']
@@ -309,8 +314,8 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
             gravidade = 'ERRO'
             stats['erros'] += 1
 
-        elif len(entradas_liquidas) > 1:
-            if saidas_liquidas == {31200} and entradas_liquidas == {21000, 31300}:
+        elif len(entradas_liquidas_filtradas) > 1:
+            if saidas_liquidas == {31200} and entradas_liquidas_filtradas == {21000, 31300}:
                 msg = f"OK: Transição aceita 31200 → (21000 + 31300)"
                 gravidade = 'OK'
                 stats['ok'] += 1
@@ -319,9 +324,9 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
                 gravidade = 'ERRO'
                 stats['erros'] += 1
 
-        elif len(saidas_liquidas) == 1 and len(entradas_liquidas) == 1:
+        elif len(saidas_liquidas) == 1 and len(entradas_liquidas_filtradas) == 1:
             cod_origem = list(saidas_liquidas)[0]
-            cod_destino = list(entradas_liquidas)[0]
+            cod_destino = list(entradas_liquidas_filtradas)[0]
 
             if (cod_origem, cod_destino) in regras_validas:
                 if cod_origem == 21000 and cod_destino in {31100, 31200, 31300, 22000}:
@@ -337,8 +342,8 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
                 gravidade = 'ERRO'
                 stats['erros'] += 1
 
-        elif len(saidas_liquidas) == 0 and len(entradas_liquidas) > 0:
-            cod_entrada = list(entradas_liquidas)[0]
+        elif len(saidas_liquidas) == 0 and len(entradas_liquidas_filtradas) > 0:
+            cod_entrada = list(entradas_liquidas_filtradas)[0]
             plano = group['PLANO'].iloc[0] if 'PLANO' in group.columns else None
 
             if plano == 5 and cod_entrada in constantes['CODIGOS_ADMISSAO']:
@@ -350,12 +355,12 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
                 gravidade = 'INFO'
                 stats['info'] += 1
 
-        elif len(saidas_liquidas) == 0 and len(entradas_liquidas) == 0 and len(entradas_independentes_liquidas) > 0:
+        elif len(saidas_liquidas) == 0 and len(entradas_liquidas_filtradas) == 0 and len(entradas_independentes_liquidas) > 0:
             msg = f"OK: Lançamento(s) independente(s) ({', '.join(map(str, sorted(entradas_independentes_liquidas)))})"
             gravidade = 'OK'
             stats['ok'] += 1
 
-        elif len(saidas_liquidas) > 0 and len(entradas_liquidas) == 0:
+        elif len(saidas_liquidas) > 0 and len(entradas_liquidas_filtradas) == 0:
             # Saída de autopatrocinado (22000) sem entrada é ERRO
             if 22000 in saidas_liquidas:
                 msg = f"ERRO: Saída de autopatrocinado (22000) sem entrada em nova situação"

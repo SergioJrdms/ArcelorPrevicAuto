@@ -1406,33 +1406,67 @@ def main():
             st.markdown("## 🔬 Análise de Movimentações")
 
             meses_disponiveis = sorted(df_para_analise['ANO MES'].unique())
-            mes_selecionado = st.selectbox(
-                "Selecione o mês para análise:",
-                meses_disponiveis,
-                index=len(meses_disponiveis)-1
-            )
+            
+            col_mes1, col_mes2 = st.columns([3, 1])
+            with col_mes1:
+                meses_selecionados = st.multiselect(
+                    "Selecione o(s) mês(es) para análise:",
+                    options=meses_disponiveis,
+                    default=[meses_disponiveis[-1]],
+                    format_func=lambda x: f"{str(x)[:4]}/{str(x)[4:]}"
+                )
+            with col_mes2:
+                selecionar_todos = st.checkbox("Selecionar Todos", value=False)
+                if selecionar_todos:
+                    meses_selecionados = meses_disponiveis
 
-            if st.button("▶️ Executar Análise", type="primary", use_container_width=True):
+            if not meses_selecionados:
+                st.warning("⚠️ Selecione pelo menos um mês para análise")
+            else:
+                if len(meses_selecionados) == 1:
+                    st.info(f"📅 Analisando: {str(meses_selecionados[0])[:4]}/{str(meses_selecionados[0])[4:]}")
+                else:
+                    st.info(f"📅 Analisando: {len(meses_selecionados)} meses selecionados")
+            
+            if st.button("▶️ Executar Análise", type="primary", use_container_width=True, disabled=not meses_selecionados):
                 with st.spinner('🔄 Analisando movimentações...'):
-                    df_resultado, stats = analisar_movimentacoes_mes(
-                        df_para_analise,
-                        df_codigos,
-                        regras_validas,
-                        constantes,
-                        mes_analise=mes_selecionado
-                    )
+                    if len(meses_selecionados) == 1:
+                        # Análise de um único mês
+                        df_resultado, stats = analisar_movimentacoes_mes(
+                            df_para_analise,
+                            df_codigos,
+                            regras_validas,
+                            constantes,
+                            mes_analise=meses_selecionados[0]
+                        )
+                    else:
+                        # Análise de múltiplos meses
+                        df_resultado, stats = analisar_movimentacoes_periodo(
+                            df_para_analise,
+                            df_codigos,
+                            regras_validas,
+                            constantes,
+                            meses=meses_selecionados
+                        )
 
                     # Salva no session state
                     st.session_state['df_resultado'] = df_resultado
                     st.session_state['stats'] = stats
-                    st.session_state['mes_analisado'] = mes_selecionado
+                    st.session_state['meses_analisados'] = meses_selecionados
                     st.session_state['df_dados'] = df_para_analise
                     st.session_state.pop('pdf_bytes', None)
+
 
                     st.success("✅ Análise concluída!")
 
                     # Métricas
-                    st.markdown("### 📊 Resultados Gerais")
+                    if len(meses_selecionados) == 1:
+                        periodo_titulo = f"{str(meses_selecionados[0])[:4]}/{str(meses_selecionados[0])[4:]}"
+                    else:
+                        periodo_titulo = f"{len(meses_selecionados)} meses ({str(meses_selecionados[0])[:4]}/{str(meses_selecionados[0])[4:]} a {str(meses_selecionados[-1])[:4]}/{str(meses_selecionados[-1])[4:]})"
+                    
+                    st.markdown(f"### 📊 Resultados Gerais - {periodo_titulo}")
+                    
                     col1, col2, col3, col4 = st.columns(4)
 
                     with col1:
@@ -1487,10 +1521,16 @@ def main():
 
                             writer.close()
 
+                        # Nome do arquivo baseado nos meses selecionados
+                        if len(meses_selecionados) == 1:
+                            nome_arquivo = f"analise_completa_{meses_selecionados[0]}.xlsx"
+                        else:
+                            nome_arquivo = f"analise_completa_{meses_selecionados[0]}_a_{meses_selecionados[-1]}.xlsx"
+                        
                         st.download_button(
                             label="📊 Download Análise Completa (XLSX)",
                             data=buffer.getvalue(),
-                            file_name=f"analise_completa_{mes_selecionado}.xlsx",
+                            file_name=nome_arquivo,
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
 

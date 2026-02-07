@@ -201,6 +201,14 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
                     stats['erros'] += 1
                     continue
 
+        # Validação 2: Pensão vs Pecúlio
+        entradas = group[group['MOVIMENTO'] == 'ENTRADA']
+        codigos_entrada_set = set(entradas['CODIGO BENEFICIO'])
+
+        # Análise de transições
+        saidas = group[group['MOVIMENTO'] == 'SAIDA']
+        codigos_saida_set = set(saidas['CODIGO BENEFICIO'])
+
         # Validação 1.5: Código 14000 (Pensão) isolado sem 33000
         if 14000 in codigos_entrada_set or 14000 in codigos_saida_set:
             if 14000 in codigos_saida_set and 33000 not in codigos_saida_set:
@@ -215,14 +223,6 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
                 df_mes.loc[group.index, 'GRAVIDADE'] = 'ERRO'
                 stats['erros'] += 1
                 continue
-
-        # Validação 2: Pensão vs Pecúlio
-        entradas = group[group['MOVIMENTO'] == 'ENTRADA']
-        codigos_entrada_set = set(entradas['CODIGO BENEFICIO'])
-
-        # Análise de transições
-        saidas = group[group['MOVIMENTO'] == 'SAIDA']
-        codigos_saida_set = set(saidas['CODIGO BENEFICIO'])
 
         if 14000 in codigos_entrada_set and 15000 in codigos_entrada_set:
             msg = "ERRO: PENSÃO e PECÚLIO no mesmo mês"

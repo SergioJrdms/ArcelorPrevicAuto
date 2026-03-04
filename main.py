@@ -209,19 +209,27 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
         saidas = group[group['MOVIMENTO'] == 'SAIDA']
         codigos_saida_set = set(saidas['CODIGO BENEFICIO'])
 
+        # Validação: Resgate (23000) exige saída de ativo/BPD no mesmo mês
+        if 23000 in codigos_entrada_set and not (codigos_saida_set & {31200, 21000, 22000}):
+            msg = "ERRO: Resgate (23000) sem saída correspondente de ativo (31200) ou BPD (21000/22000)"
+            df_mes.loc[group.index, 'ANALISE'] = msg
+            df_mes.loc[group.index, 'GRAVIDADE'] = 'ERRO'
+            stats['erros'] += 1
+            continue
+
         # Validação 1.5: Código 14000 (Pensão) isolado sem 33000
         if 14000 in codigos_entrada_set or 14000 in codigos_saida_set:
             if 14000 in codigos_saida_set and 33000 not in codigos_saida_set:
-                msg = "ERRO: Saída no código 14000 (Pensão por Morte) sem saída correspondente na conta 33000 (Consolidado Pensionistas)"
+                msg = "INFO: Saída no código 14000 (Pensão por Morte) sem saída correspondente na conta 33000 no mesmo mês - verificar meses adjacentes"
                 df_mes.loc[group.index, 'ANALISE'] = msg
-                df_mes.loc[group.index, 'GRAVIDADE'] = 'ERRO'
-                stats['erros'] += 1
+                df_mes.loc[group.index, 'GRAVIDADE'] = 'INFO'
+                stats['info'] += 1
                 continue
             if 14000 in codigos_entrada_set and 33000 not in codigos_entrada_set:
-                msg = "ERRO: Entrada no código 14000 (Pensão por Morte) sem entrada correspondente na conta 33000 (Consolidado Pensionistas)"
+                msg = "INFO: Entrada no código 14000 (Pensão por Morte) sem entrada correspondente na conta 33000 no mesmo mês - verificar meses adjacentes"
                 df_mes.loc[group.index, 'ANALISE'] = msg
-                df_mes.loc[group.index, 'GRAVIDADE'] = 'ERRO'
-                stats['erros'] += 1
+                df_mes.loc[group.index, 'GRAVIDADE'] = 'INFO'
+                stats['info'] += 1
                 continue
 
         if 14000 in codigos_entrada_set and 15000 in codigos_entrada_set:
@@ -253,26 +261,26 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
                 movs_instituto = codigos_entrada_set.union(codigos_saida_set) & codigos_instituto
                 
                 if not movs_instituto:
-                    msg = "ERRO: Código 31300 lançado sem movimentação correspondente nas contas de instituto (21000, 22000)"
+                    msg = "INFO: Código 31300 sem movimentação de instituto correspondente no mesmo mês - verificar meses adjacentes"
                     df_mes.loc[group.index, 'ANALISE'] = msg
-                    df_mes.loc[group.index, 'GRAVIDADE'] = 'ERRO'
-                    stats['erros'] += 1
+                    df_mes.loc[group.index, 'GRAVIDADE'] = 'INFO'
+                    stats['info'] += 1
                     continue
             
 
         # Validação 4: Código 33000 deve sempre acompanhar 14000
         if 33000 in codigos_entrada_set or 33000 in codigos_saida_set:
             if 33000 in codigos_entrada_set and 14000 not in codigos_entrada_set:
-                msg = "ERRO: Entrada no código 33000 (Consolidado Pensionistas) sem entrada correspondente na conta 14000 (Pensão por Morte)"
+                msg = "INFO: Entrada no código 33000 (Consolidado Pensionistas) sem entrada correspondente na conta 14000 no mesmo mês - verificar meses adjacentes"
                 df_mes.loc[group.index, 'ANALISE'] = msg
-                df_mes.loc[group.index, 'GRAVIDADE'] = 'ERRO'
-                stats['erros'] += 1
+                df_mes.loc[group.index, 'GRAVIDADE'] = 'INFO'
+                stats['info'] += 1
                 continue
             if 33000 in codigos_saida_set and 14000 not in codigos_saida_set:
-                msg = "ERRO: Saída no código 33000 (Consolidado Pensionistas) sem saída correspondente na conta 14000 (Pensão por Morte)"
+                msg = "INFO: Saída no código 33000 (Consolidado Pensionistas) sem saída correspondente na conta 14000 no mesmo mês - verificar meses adjacentes"
                 df_mes.loc[group.index, 'ANALISE'] = msg
-                df_mes.loc[group.index, 'GRAVIDADE'] = 'ERRO'
-                stats['erros'] += 1
+                df_mes.loc[group.index, 'GRAVIDADE'] = 'INFO'
+                stats['info'] += 1
                 continue
 
             
@@ -314,6 +322,21 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
         else:
             entradas_liquidas_filtradas = entradas_liquidas
 
+        # Strip de códigos consolidadores companheiros (não devem contar como saída/entrada independente)
+        if 32000 in saidas_liquidas and bool(saidas_liquidas & {11100, 11200}):
+            saidas_liquidas = saidas_liquidas - {32000}
+        if 33000 in saidas_liquidas and 14000 in saidas_liquidas:
+            saidas_liquidas = saidas_liquidas - {33000}
+        if 31300 in saidas_liquidas and 22000 in saidas_liquidas:
+            saidas_liquidas = saidas_liquidas - {31300}
+
+        if 32000 in entradas_liquidas_filtradas and bool(entradas_liquidas_filtradas & {11100, 11200}):
+            entradas_liquidas_filtradas = entradas_liquidas_filtradas - {32000}
+        if 33000 in entradas_liquidas_filtradas and 14000 in entradas_liquidas_filtradas:
+            entradas_liquidas_filtradas = entradas_liquidas_filtradas - {33000}
+        if 31300 in entradas_liquidas_filtradas and 22000 in entradas_liquidas_filtradas:
+            entradas_liquidas_filtradas = entradas_liquidas_filtradas - {31300}
+
         # Classificação de passos
         for idx, row in group.iterrows():
             cod = row['CODIGO BENEFICIO']
@@ -321,6 +344,14 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
 
             if cod in entradas_independentes_liquidas and mov == 'ENTRADA':
                 df_mes.loc[idx, 'TIPO_PASSO'] = '0. Independente'
+            elif cod == 34000:
+                df_mes.loc[idx, 'TIPO_PASSO'] = '0. Independente'
+            elif cod == 32000 and mov == 'SAIDA' and bool(codigos_saida_set & {11100, 11200}):
+                df_mes.loc[idx, 'TIPO_PASSO'] = '3. Fim'
+            elif cod == 33000 and mov == 'SAIDA' and 14000 in codigos_saida_set:
+                df_mes.loc[idx, 'TIPO_PASSO'] = '3. Fim'
+            elif cod == 31300 and mov == 'SAIDA' and 22000 in codigos_saida_set:
+                df_mes.loc[idx, 'TIPO_PASSO'] = '1. Início'
             elif cod in saidas_liquidas and mov == 'SAIDA':
                 df_mes.loc[idx, 'TIPO_PASSO'] = '1. Início'
             elif cod in entradas_liquidas and mov == 'ENTRADA':
@@ -406,7 +437,6 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
             gravidade = 'OK'
             stats['ok'] += 1
 
-
         elif len(saidas_liquidas) > 0 and len(entradas_liquidas_filtradas) == 0:
             # Verifica se há códigos consolidadores correspondentes corretos
             tem_consolidador_correto = False
@@ -418,19 +448,30 @@ def analisar_movimentacoes_mes(df_mov, df_codigos, regras_validas, constantes, m
             # Para saída de pensão (14000) com 33000
             if 14000 in saidas_liquidas and 33000 in codigos_saida_set:
                 tem_consolidador_correto = True
-            
-            if tem_consolidador_correto:
+
+            if 34000 in saidas_liquidas and len(saidas_liquidas) == 1:
+                msg = "OK: Lançamento independente (34000 - Designados/Dependentes)"
+                gravidade = 'OK'
+                stats['ok'] += 1
+            elif tem_consolidador_correto:
                 msg = f"OK: Saída correta com lançamento consolidador correspondente"
                 gravidade = 'OK'
                 stats['ok'] += 1
             elif 22000 in saidas_liquidas:
-                msg = f"ERRO: Saída de autopatrocinado (22000) sem entrada em nova situação"
-                gravidade = 'ERRO'
-                stats['erros'] += 1
+                msg = f"INFO: Saída de autopatrocinado (22000) aguardando entrada em nova situação"
+                gravidade = 'INFO'
+                stats['info'] += 1
             else:
                 msg = f"INFO: Processo em andamento (aguardando conclusão)"
                 gravidade = 'INFO'
                 stats['info'] += 1
+
+        # Ajuste: 14000+33000 em entrada sem saída de ativo → pelo menos INFO
+        if 14000 in codigos_entrada_set and 33000 in codigos_entrada_set:
+            if not (codigos_saida_set & {31100, 31200, 22000, 11100, 11200}):
+                if gravidade == 'OK':
+                    msg = "INFO: Entrada de pensão (14000+33000) sem saída de ativo correspondente - verificar"
+                    gravidade = 'INFO'
 
         if msg:
             df_mes.loc[group.index, 'ANALISE'] = msg
@@ -462,6 +503,68 @@ def calcular_stats_participantes(df_res):
         'ok': int(counts.get('OK', 0))
     }
 
+def pos_processar_cross_month(df_res):
+    """Valida fluxos multi-mês por participante e corrige ANALISE/GRAVIDADE."""
+    CODIGOS_ATIVO = {31100, 31200}
+    CODIGOS_DESTINO_VALIDO = {11100, 11200, 14000, 21000, 23000, 24100, 24200}
+
+    for participante, group in df_res.groupby('CODIGO ORGANIZACAO NOME'):
+        todas_saidas = set(group[group['MOVIMENTO'] == 'SAIDA']['CODIGO BENEFICIO'])
+        todas_entradas = set(group[group['MOVIMENTO'] == 'ENTRADA']['CODIGO BENEFICIO'])
+
+        tem_saida_ativo = bool(todas_saidas & CODIGOS_ATIVO)
+        tem_saida_auto = 22000 in todas_saidas
+        tem_destino = bool(todas_entradas & CODIGOS_DESTINO_VALIDO)
+
+        # Padrão completo: saída de ativo/autopatrocinado + destino válido em qualquer mês → OK
+        if (tem_saida_ativo or tem_saida_auto) and tem_destino:
+            mask_upgrade = (group['GRAVIDADE'] == 'INFO') | (
+                (group['GRAVIDADE'] == 'ERRO') &
+                (group['CODIGO BENEFICIO'] == 23000) &
+                (group['ANALISE'].str.startswith('ERRO: Resgate'))
+            )
+            if mask_upgrade.any():
+                idx = group[mask_upgrade].index
+                df_res.loc[idx, 'GRAVIDADE'] = 'OK'
+                df_res.loc[idx, 'ANALISE'] = 'OK: Fluxo multi-mês validado'
+
+        # Saída de ativo SEM qualquer destino no período inteiro → ERRO
+        elif tem_saida_ativo and not tem_destino and not tem_saida_auto:
+            mask_saida = (
+                (group['GRAVIDADE'] == 'INFO') &
+                (group['CODIGO BENEFICIO'].isin(CODIGOS_ATIVO)) &
+                (group['MOVIMENTO'] == 'SAIDA')
+            )
+            if mask_saida.any():
+                idx = group[mask_saida].index
+                df_res.loc[idx, 'GRAVIDADE'] = 'ERRO'
+                df_res.loc[idx, 'ANALISE'] = 'ERRO: Saída de ativo sem entrada correspondente em nenhum mês do período'
+
+        # 14000+33000 cross-month: ambos saem em meses diferentes → OK
+        if 14000 in todas_saidas and 33000 in todas_saidas:
+            mask = (
+                (group['CODIGO BENEFICIO'].isin({14000, 33000})) &
+                (group['MOVIMENTO'] == 'SAIDA') &
+                (group['GRAVIDADE'].isin(['ERRO', 'INFO']))
+            )
+            if mask.any():
+                idx = group[mask].index
+                df_res.loc[idx, 'GRAVIDADE'] = 'OK'
+                df_res.loc[idx, 'ANALISE'] = 'OK: Saída de pensão (14000+33000) validada entre meses'
+
+        # 14000+33000: apenas um sai no período → ERRO (inconsistência real)
+        elif (14000 in todas_saidas) != (33000 in todas_saidas):
+            mask = (
+                (group['CODIGO BENEFICIO'].isin({14000, 33000})) &
+                (group['MOVIMENTO'] == 'SAIDA') &
+                (group['GRAVIDADE'] == 'INFO')
+            )
+            if mask.any():
+                idx = group[mask].index
+                df_res.loc[idx, 'GRAVIDADE'] = 'ERRO'
+                df_res.loc[idx, 'ANALISE'] = 'ERRO: Saída de pensão incompleta — 14000 sem 33000 correspondente (ou vice-versa) no período'
+
+    return df_res
 
 def analisar_movimentacoes_periodo(df_mov, df_codigos, regras_validas, constantes, meses):
     dfs = []
@@ -475,11 +578,12 @@ def analisar_movimentacoes_periodo(df_mov, df_codigos, regras_validas, constante
         )
         if df_mes is not None and not df_mes.empty:
             dfs.append(df_mes)
-
+    
     if not dfs:
         return pd.DataFrame(), {'total': 0, 'erros': 0, 'info': 0, 'ok': 0}
 
     df_res = pd.concat(dfs, ignore_index=True)
+    df_res = pos_processar_cross_month(df_res)
     stats = calcular_stats_participantes(df_res)
     return df_res, stats
 
